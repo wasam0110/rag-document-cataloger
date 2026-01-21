@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG Document Cataloger</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <header class="header">
+        <h1>📚 RAG Document Cataloger</h1>
+        <p>Upload, catalog, and explore documents with AI-powered extraction</p>
+      </header>
+
+      <!-- Upload Section -->
+      <section class="upload-section">
+        <h2>Upload Document</h2>
+        <form id="upload-form" enctype="multipart/form-data">
+          <div class="upload-area">
+            <input
+              type="file"
+              id="file-input"
+              accept=".pdf,.docx,.csv,.txt"
+              required
+            />
+            <button type="submit" id="upload-btn" class="btn btn-primary">
+              Upload & Process
+            </button>
+          </div>
+        </form>
+        <div id="upload-status" class="status"></div>
+      </section>
+
+      <!-- Documents List -->
+      <section class="documents-section">
+        <div class="section-header">
+          <h2>Documents</h2>
+          <button id="refresh-docs-btn" class="btn btn-secondary">
+            🔄 Refresh
+          </button>
+        </div>
+        <div id="documents-list" class="documents-list">
+          <p>Loading documents...</p>
+        </div>
+      </section>
+
+      <!-- Catalog Section (Hidden by default) -->
+      <section id="catalog-section" class="catalog-section hidden">
+        <div id="catalog-header" class="catalog-header"></div>
+        <div id="catalog-counts" class="catalog-counts"></div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="tables">Tables</button>
+          <button class="tab-btn" data-tab="topics">Topics</button>
+          <button class="tab-btn" data-tab="keywords">Keywords</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div class="tab-content active" id="tables-content">
+          <h3>Extracted Tables</h3>
+          <div id="tables-gallery" class="gallery"></div>
+        </div>
+
+        <div class="tab-content" id="topics-content">
+          <h3>Document Topics</h3>
+          <div id="topics-list" class="topics-list"></div>
+        </div>
+
+        <div class="tab-content" id="keywords-content">
+          <h3>Keywords</h3>
+          <div id="keywords-list" class="keywords-list"></div>
+        </div>
+      </section>
+
+      <!-- Table Modal -->
+      <div id="table-modal" class="modal hidden">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3 id="modal-title">Table Details</h3>
+            <button id="modal-close" class="close-btn">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-actions">
+              <button id="view-inline-btn" class="btn btn-secondary active">
+                View Inline
+              </button>
+              <button id="open-pdf-btn" class="btn btn-primary">
+                Open in PDF
+              </button>
+            </div>
+            <div class="table-preview">
+              <img id="table-image" src="" alt="Table" class="table-image" />
+            </div>
+            <div class="table-text-container">
+              <h4>Table Text</h4>
+              <pre id="table-text" class="table-text"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PDF Modal -->
+      <div id="pdf-modal" class="modal hidden">
+        <div class="modal-content pdf-modal-content">
+          <div class="modal-header">
+            <h3 id="pdf-modal-title">PDF Viewer</h3>
+            <button id="pdf-modal-close" class="close-btn">✕</button>
+          </div>
+          <div class="modal-body pdf-body">
+            <iframe id="pdf-iframe" class="pdf-iframe"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
