@@ -40,3 +40,25 @@ htmlcov/
 # Temporary files
 *.tmp
 *.bak
+
+# User uploads and generated images
+uploads/
+table_images/
+
+# Environment and config
+.env
+
+# SQLite and model files
+*.sqlite3
+*.pkl
+*.h5
+*.pt
+
+# Archives
+*.zip
+*.tar
+*.gz
+
+# Python type checker and notebook checkpoints
+.mypy_cache/
+.ipynb_checkpoints/
