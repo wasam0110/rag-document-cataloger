@@ -38,7 +38,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             chunks_count INTEGER DEFAULT 0,
             tables_count INTEGER DEFAULT 0,
-            topics_count INTEGER DEFAULT 0
+            topics_count INTEGER DEFAULT 0,
+            images_count INTEGER DEFAULT 0
         )
     """)
     
@@ -89,11 +90,26 @@ def init_db():
         )
     """)
     
+    # Images table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS images (
+            image_id TEXT PRIMARY KEY,
+            doc_id TEXT NOT NULL,
+            page_number INTEGER NOT NULL,
+            image_index INTEGER NOT NULL,
+            bbox TEXT,
+            width INTEGER,
+            height INTEGER,
+            FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
+        )
+    """)
+    
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tables_doc_id ON tables(doc_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_topics_doc_id ON topics(doc_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_topics_section ON topics(section_type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_doc_id ON images(doc_id)")
     
     conn.commit()
     conn.close()
@@ -208,6 +224,35 @@ def save_topics(doc_id: str, topics: List[Dict[str, Any]]) -> bool:
         return False
 
 
+def save_images(doc_id: str, images: List[Dict[str, Any]]) -> bool:
+    """Save document images."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        for image in images:
+            cursor.execute("""
+                INSERT OR REPLACE INTO images (
+                    image_id, doc_id, page_number, image_index, bbox, width, height
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                image.get("image_id"),
+                doc_id,
+                image.get("page_number"),
+                image.get("image_index"),
+                json.dumps(image.get("bbox", [])),
+                image.get("width"),
+                image.get("height")
+            ))
+        cursor.execute("UPDATE documents SET images_count = ? WHERE doc_id = ?", (len(images), doc_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error saving images: {e}")
+        return False
+
+
 def get_document(doc_id: str) -> Optional[Dict[str, Any]]:
     """Get document by ID."""
     try:
@@ -307,16 +352,51 @@ def get_document_topics(doc_id: str) -> List[Dict[str, Any]]:
         for row in rows:
             topic = dict(row)
             if topic.get("chunk_ids"):
-                try:
-                    topic["chunk_ids"] = json.loads(topic["chunk_ids"])
-                except:
-                    topic["chunk_ids"] = []
-            else:
-                topic["chunk_ids"] = []
+                topic["chunk_ids"] = json.loads(topic["chunk_ids"])
             topics.append(topic)
         return topics
     except Exception as e:
         logger.error(f"Error getting topics: {e}")
+        return []
+
+
+def get_document_images(doc_id: str) -> List[Dict[str, Any]]:
+    """Get images for a document."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM images WHERE doc_id = ? ORDER BY page_number, image_index", (doc_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        images = []
+        for row in rows:
+            image = dict(row)
+            if image.get("bbox"):
+                image["bbox"] = json.loads(image["bbox"])
+            images.append(image)
+        return images
+    except Exception as e:
+        logger.error(f"Error getting images: {e}")
+        return []
+
+
+def get_sections_by_type(doc_id: str, section_type: str) -> List[Dict[str, Any]]:
+    """Get topics/sections by type (abstract, introduction, results, conclusion, references)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM topics WHERE doc_id = ? AND section_type = ? ORDER BY start_page", (doc_id, section_type))
+        rows = cursor.fetchall()
+        conn.close()
+        sections = []
+        for row in rows:
+            section = dict(row)
+            if section.get("chunk_ids"):
+                section["chunk_ids"] = json.loads(section["chunk_ids"])
+            sections.append(section)
+        return sections
+    except Exception as e:
+        logger.error(f"Error getting sections: {e}")
         return []
 
 
@@ -329,6 +409,7 @@ def delete_document(doc_id: str) -> bool:
         cursor.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
         cursor.execute("DELETE FROM tables WHERE doc_id = ?", (doc_id,))
         cursor.execute("DELETE FROM topics WHERE doc_id = ?", (doc_id,))
+        cursor.execute("DELETE FROM images WHERE doc_id = ?", (doc_id,))
         cursor.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
         conn.commit()
         conn.close()

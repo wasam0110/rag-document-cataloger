@@ -15,7 +15,8 @@ from app.db.sqlite import (
     save_document_metadata,
     save_chunks,
     save_tables,
-    save_topics
+    save_topics,
+    save_images
 )
 
 SUPPORTED_EXTENSIONS = {
@@ -66,10 +67,15 @@ async def ingest_document(file: UploadFile) -> str:
         if extracted.get("topics"):
             save_topics(doc_id, extracted["topics"])
         
+        if extracted.get("images"):
+            save_images(doc_id, extracted["images"])
+        
         # Build index
         if extracted.get("chunks"):
             try:
+                logger.info(f"Building FAISS index for {len(extracted['chunks'])} chunks...")
                 await build_index(doc_id, extracted["chunks"])
+                logger.info("FAISS index built successfully")
             except Exception as e:
                 logger.warning(f"Index building failed: {e}")
         

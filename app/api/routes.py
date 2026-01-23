@@ -16,6 +16,8 @@ from app.db.sqlite import (
     get_document_tables,
     get_document_chunks,
     get_document_topics,
+    get_document_images,
+    get_sections_by_type,
     get_table_by_id,
     list_documents,
     delete_document
@@ -248,7 +250,7 @@ async def get_table_image(table_id: str):
 
 @router.get("/pdf/{doc_id}")
 async def serve_pdf(doc_id: str, page: Optional[int] = Query(None, ge=1)):
-    """Serve PDF file."""
+    """Serve PDF file for inline viewing (not download)."""
     try:
         doc = get_document(doc_id)
         if not doc:
@@ -261,7 +263,14 @@ async def serve_pdf(doc_id: str, page: Optional[int] = Query(None, ge=1)):
         if not pdf_path.exists():
             raise HTTPException(status_code=404, detail="PDF file not found")
         
-        response = FileResponse(str(pdf_path), media_type="application/pdf", filename=doc.get("filename"))
+        # Return PDF for inline viewing (not as attachment/download)
+        response = FileResponse(
+            str(pdf_path), 
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": "inline",  # Forces browser to display, not download
+            }
+        )
         if page:
             response.headers["X-PDF-Page"] = str(page)
         return response
@@ -323,4 +332,98 @@ async def query_documents(doc_id: str = Query(...), query: str = Query(...), top
         raise
     except Exception as e:
         logger.error(f"Query error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{doc_id}/sections")
+async def get_document_sections(doc_id: str):
+    """Get all sections organized by dynamically detected categories."""
+    try:
+        doc = get_document(doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Get all topics to discover categories
+        all_topics = get_document_topics(doc_id)
+        
+        # Group topics by section_type (dynamic categories)
+        sections = {}
+        categories = set()
+        
+        for topic in all_topics:
+            section_type = topic.get("section_type") or "other"
+            categories.add(section_type)
+            if section_type not in sections:
+                sections[section_type] = []
+            sections[section_type].append(topic)
+        
+        # Always include tables and images
+        sections["tables"] = get_document_tables(doc_id)
+        sections["images"] = get_document_images(doc_id)
+        
+        # Add tables/images to categories if they exist
+        if sections["tables"]:
+            categories.add("tables")
+        if sections["images"]:
+            categories.add("images")
+        
+        # Sort categories - standard ones first, then alphabetical
+        standard_order = ['abstract', 'introduction', 'methodology', 'results', 'discussion', 'conclusion', 'references']
+        sorted_categories = []
+        for std in standard_order:
+            if std in categories:
+                sorted_categories.append(std)
+                categories.discard(std)
+        sorted_categories.extend(sorted(categories))
+        
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "categories": sorted_categories,
+            "sections": sections
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting sections: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{doc_id}/sections/{section_type}")
+async def get_section_content(doc_id: str, section_type: str):
+    """Get content for a specific section type with view options."""
+    try:
+        doc = get_document(doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        valid_sections = ["abstract", "introduction", "results", "conclusion", "references", "tables", "images"]
+        if section_type not in valid_sections:
+            raise HTTPException(status_code=400, detail=f"Invalid section type. Must be one of: {valid_sections}")
+        
+        # Get section content
+        if section_type == "tables":
+            content = get_document_tables(doc_id)
+        elif section_type == "images":
+            content = get_document_images(doc_id)
+        else:
+            content = get_sections_by_type(doc_id, section_type)
+        
+        # Add PDF viewing URL for each item
+        for item in content:
+            if "page_number" in item or "start_page" in item:
+                page = item.get("page_number") or item.get("start_page")
+                item["pdf_view_url"] = f"/api/pdf/{doc_id}?page={page}"
+        
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "section_type": section_type,
+            "content": content,
+            "total": len(content)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting section content: {e}")
         raise HTTPException(status_code=500, detail=str(e))

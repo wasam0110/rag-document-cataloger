@@ -40,11 +40,18 @@ STATIC_DIR = Path(__file__).parent / "static"
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup."""
-    logger.info("Starting RAG Document Cataloger...")
-    init_db()
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Application started")
+    try:
+        from app.core.logging import logger
+        logger.info("Starting RAG Document Cataloger...")
+        from app.db.sqlite import init_db
+        init_db()
+        from app.core.config import settings
+        settings.upload_dir.mkdir(parents=True, exist_ok=True)
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("Application started")
+    except Exception as e:
+        print(f"Startup error: {e}")
+        raise
 
 
 @app.get("/")

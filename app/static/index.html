@@ -4,114 +4,215 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RAG Document Cataloger</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <div class="container">
-      <!-- Header -->
-      <header class="header">
-        <h1>📚 RAG Document Cataloger</h1>
-        <p>Upload, catalog, and explore documents with AI-powered extraction</p>
-      </header>
+    <div class="app-container">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="logo">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              ></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
+          <h1>Document Cataloger</h1>
+          <p>AI-Powered Analysis</p>
+        </div>
 
-      <!-- Upload Section -->
-      <section class="upload-section">
-        <h2>Upload Document</h2>
-        <form id="upload-form" enctype="multipart/form-data">
-          <div class="upload-area">
-            <input
-              type="file"
-              id="file-input"
-              accept=".pdf,.docx,.csv,.txt"
-              required
-            />
+        <!-- Upload Section -->
+        <div class="upload-section">
+          <h3>Upload Document</h3>
+          <form id="upload-form" enctype="multipart/form-data">
+            <div class="upload-area" id="drop-zone">
+              <input
+                type="file"
+                id="file-input"
+                accept=".pdf,.docx,.csv,.txt"
+                required
+              />
+              <div class="upload-icon">
+                <svg
+                  width="40"
+                  height="40"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+              </div>
+              <p class="upload-text">Drop file here or click to browse</p>
+              <p class="upload-hint">PDF, DOCX, CSV, TXT supported</p>
+            </div>
             <button type="submit" id="upload-btn" class="btn btn-primary">
-              Upload & Process
+              <span>Upload & Process</span>
+            </button>
+          </form>
+          <div id="upload-status" class="status"></div>
+        </div>
+
+        <!-- Documents List -->
+        <div class="documents-section">
+          <div class="section-header">
+            <h3>Documents</h3>
+            <button id="refresh-btn" class="btn-icon" title="Refresh">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
             </button>
           </div>
-        </form>
-        <div id="upload-status" class="status"></div>
-      </section>
+          <div id="documents-list" class="documents-list"></div>
+        </div>
+      </aside>
 
-      <!-- Documents List -->
-      <section class="documents-section">
-        <div class="section-header">
-          <h2>Documents</h2>
-          <button id="refresh-docs-btn" class="btn btn-secondary">
-            🔄 Refresh
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Welcome State -->
+        <div id="welcome-state" class="welcome-section">
+          <div class="welcome-icon">
+            <svg
+              width="80"
+              height="80"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              ></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+          </div>
+          <h2>Select a document to view</h2>
+          <p>
+            Upload a document or select one from the sidebar to see extracted
+            content
+          </p>
+        </div>
+
+        <!-- Document View -->
+        <div id="document-view" class="document-view hidden">
+          <div class="document-header">
+            <h2 id="document-title">Document Title</h2>
+            <div class="document-meta" id="document-meta"></div>
+          </div>
+
+          <!-- Section Tabs - Will be generated dynamically -->
+          <div class="tabs-container">
+            <div class="tabs" id="section-tabs">
+              <!-- Tabs will be dynamically generated based on document content -->
+            </div>
+          </div>
+
+          <!-- Tab Content - Dynamic -->
+          <div class="tab-contents" id="tab-contents">
+            <!-- Content will be dynamically generated -->
+          </div>
+
+          <!-- AI Chat -->
+          <div class="chat-section">
+            <div class="chat-header">
+              <h3>AI Assistant</h3>
+              <p>Ask questions about this document</p>
+            </div>
+            <div id="chat-messages" class="chat-messages">
+              <div class="chat-welcome">
+                <p>
+                  Ask me anything about this document. I can help you understand
+                  the content, find specific information, or summarize sections.
+                </p>
+              </div>
+            </div>
+            <div class="chat-input-area">
+              <input
+                type="text"
+                id="chat-input"
+                placeholder="Ask a question about this document..."
+                autocomplete="off"
+              />
+              <button id="chat-send" class="btn btn-primary">Send</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Content Modal -->
+    <div id="content-modal" class="modal">
+      <div class="modal-overlay"></div>
+      <div class="modal-container">
+        <div class="modal-header">
+          <h3 id="modal-title">Content</h3>
+          <button class="modal-close" id="modal-close">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
           </button>
         </div>
-        <div id="documents-list" class="documents-list">
-          <p>Loading documents...</p>
-        </div>
-      </section>
-
-      <!-- Catalog Section (Hidden by default) -->
-      <section id="catalog-section" class="catalog-section hidden">
-        <div id="catalog-header" class="catalog-header"></div>
-        <div id="catalog-counts" class="catalog-counts"></div>
-
-        <!-- Tabs -->
-        <div class="tabs">
-          <button class="tab-btn active" data-tab="tables">Tables</button>
-          <button class="tab-btn" data-tab="topics">Topics</button>
-          <button class="tab-btn" data-tab="keywords">Keywords</button>
-        </div>
-
-        <!-- Tab Contents -->
-        <div class="tab-content active" id="tables-content">
-          <h3>Extracted Tables</h3>
-          <div id="tables-gallery" class="gallery"></div>
-        </div>
-
-        <div class="tab-content" id="topics-content">
-          <h3>Document Topics</h3>
-          <div id="topics-list" class="topics-list"></div>
-        </div>
-
-        <div class="tab-content" id="keywords-content">
-          <h3>Keywords</h3>
-          <div id="keywords-list" class="keywords-list"></div>
-        </div>
-      </section>
-
-      <!-- Table Modal -->
-      <div id="table-modal" class="modal hidden">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3 id="modal-title">Table Details</h3>
-            <button id="modal-close" class="close-btn">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="modal-actions">
-              <button id="view-inline-btn" class="btn btn-secondary active">
-                View Inline
-              </button>
-              <button id="open-pdf-btn" class="btn btn-primary">
-                Open in PDF
-              </button>
-            </div>
-            <div class="table-preview">
-              <img id="table-image" src="" alt="Table" class="table-image" />
-            </div>
-            <div class="table-text-container">
-              <h4>Table Text</h4>
-              <pre id="table-text" class="table-text"></pre>
-            </div>
-          </div>
-        </div>
+        <div class="modal-body" id="modal-body"></div>
       </div>
+    </div>
 
-      <!-- PDF Modal -->
-      <div id="pdf-modal" class="modal hidden">
-        <div class="modal-content pdf-modal-content">
-          <div class="modal-header">
-            <h3 id="pdf-modal-title">PDF Viewer</h3>
-            <button id="pdf-modal-close" class="close-btn">✕</button>
-          </div>
-          <div class="modal-body pdf-body">
-            <iframe id="pdf-iframe" class="pdf-iframe"></iframe>
-          </div>
+    <!-- PDF Modal -->
+    <div id="pdf-modal" class="modal">
+      <div class="modal-overlay"></div>
+      <div class="modal-container modal-large">
+        <div class="modal-header">
+          <h3 id="pdf-modal-title">PDF Viewer</h3>
+          <button class="modal-close" id="pdf-modal-close">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <iframe id="pdf-iframe" class="pdf-iframe"></iframe>
         </div>
       </div>
     </div>
