@@ -38,8 +38,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             chunks_count INTEGER DEFAULT 0,
             tables_count INTEGER DEFAULT 0,
-            topics_count INTEGER DEFAULT 0,
-            keywords_count INTEGER DEFAULT 0
+            topics_count INTEGER DEFAULT 0
         )
     """)
     
@@ -80,20 +79,12 @@ def init_db():
             topic_id TEXT PRIMARY KEY,
             doc_id TEXT NOT NULL,
             title TEXT NOT NULL,
+            section_type TEXT,
             start_page INTEGER,
             end_page INTEGER,
             level INTEGER,
-            FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
-        )
-    """)
-    
-    # Keywords table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS keywords (
-            keyword_id TEXT PRIMARY KEY,
-            doc_id TEXT NOT NULL,
-            keyword TEXT NOT NULL,
-            score REAL,
+            chunk_ids TEXT,
+            content TEXT,
             FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
         )
     """)
@@ -102,7 +93,7 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_tables_doc_id ON tables(doc_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_topics_doc_id ON topics(doc_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_keywords_doc_id ON keywords(doc_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_topics_section ON topics(section_type)")
     
     conn.commit()
     conn.close()
@@ -193,15 +184,20 @@ def save_topics(doc_id: str, topics: List[Dict[str, Any]]) -> bool:
         cursor = conn.cursor()
         for topic in topics:
             cursor.execute("""
-                INSERT OR REPLACE INTO topics (topic_id, doc_id, title, start_page, end_page, level)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO topics (
+                    topic_id, doc_id, title, section_type, start_page, end_page, level, chunk_ids, content
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 topic.get("topic_id"),
                 doc_id,
                 topic.get("title"),
+                topic.get("section_type"),
                 topic.get("start_page"),
                 topic.get("end_page"),
-                topic.get("level")
+                topic.get("level"),
+                json.dumps(topic.get("chunk_ids", [])),
+                topic.get("content", "")
             ))
         cursor.execute("UPDATE documents SET topics_count = ? WHERE doc_id = ?", (len(topics), doc_id))
         conn.commit()
@@ -209,30 +205,6 @@ def save_topics(doc_id: str, topics: List[Dict[str, Any]]) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error saving topics: {e}")
-        return False
-
-
-def save_keywords(doc_id: str, keywords: List[Dict[str, Any]]) -> bool:
-    """Save extracted keywords."""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        for kw in keywords:
-            cursor.execute("""
-                INSERT OR REPLACE INTO keywords (keyword_id, doc_id, keyword, score)
-                VALUES (?, ?, ?, ?)
-            """, (
-                kw.get("keyword_id"),
-                doc_id,
-                kw.get("keyword"),
-                kw.get("score")
-            ))
-        cursor.execute("UPDATE documents SET keywords_count = ? WHERE doc_id = ?", (len(keywords), doc_id))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Error saving keywords: {e}")
         return False
 
 
@@ -328,26 +300,23 @@ def get_document_topics(doc_id: str) -> List[Dict[str, Any]]:
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM topics WHERE doc_id = ? ORDER BY start_page", (doc_id,))
+        cursor.execute("SELECT * FROM topics WHERE doc_id = ? ORDER BY start_page, level", (doc_id,))
         rows = cursor.fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        topics = []
+        for row in rows:
+            topic = dict(row)
+            if topic.get("chunk_ids"):
+                try:
+                    topic["chunk_ids"] = json.loads(topic["chunk_ids"])
+                except:
+                    topic["chunk_ids"] = []
+            else:
+                topic["chunk_ids"] = []
+            topics.append(topic)
+        return topics
     except Exception as e:
         logger.error(f"Error getting topics: {e}")
-        return []
-
-
-def get_document_keywords(doc_id: str) -> List[Dict[str, Any]]:
-    """Get keywords for a document."""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM keywords WHERE doc_id = ? ORDER BY score DESC", (doc_id,))
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-    except Exception as e:
-        logger.error(f"Error getting keywords: {e}")
         return []
 
 
@@ -360,7 +329,6 @@ def delete_document(doc_id: str) -> bool:
         cursor.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
         cursor.execute("DELETE FROM tables WHERE doc_id = ?", (doc_id,))
         cursor.execute("DELETE FROM topics WHERE doc_id = ?", (doc_id,))
-        cursor.execute("DELETE FROM keywords WHERE doc_id = ?", (doc_id,))
         cursor.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
         conn.commit()
         conn.close()

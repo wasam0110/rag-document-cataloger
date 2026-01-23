@@ -16,7 +16,6 @@ from app.db.sqlite import (
     get_document_tables,
     get_document_chunks,
     get_document_topics,
-    get_document_keywords,
     get_table_by_id,
     list_documents,
     delete_document
@@ -68,8 +67,7 @@ async def upload_document(file: UploadFile = File(...)):
             "counts": {
                 "chunks": doc.get("chunks_count", 0) if doc else 0,
                 "tables": doc.get("tables_count", 0) if doc else 0,
-                "topics": doc.get("topics_count", 0) if doc else 0,
-                "keywords": doc.get("keywords_count", 0) if doc else 0
+                "topics": doc.get("topics_count", 0) if doc else 0
             }
         }
     except HTTPException:
@@ -115,7 +113,36 @@ async def get_catalog(doc_id: str):
             tables_with_urls.append(table_data)
         
         topics = get_document_topics(doc_id)
-        keywords = get_document_keywords(doc_id)
+        
+        # Add navigation URLs to topics
+        topics_with_urls = []
+        for topic in topics:
+            topic_data = {
+                **topic,
+                "view_url": f"/api/pdf/{doc_id}?page={topic.get('start_page')}" if doc.get("filetype") == "pdf" else None,
+                "chunk_count": len(topic.get("chunk_ids", []))
+            }
+            topics_with_urls.append(topic_data)
+        
+        # Organize topics by section type
+        sections = {
+            "abstract": [],
+            "introduction": [],
+            "background": [],
+            "methodology": [],
+            "results": [],
+            "discussion": [],
+            "conclusion": [],
+            "references": [],
+            "other": []
+        }
+        
+        for topic in topics_with_urls:
+            section_type = topic.get("section_type") or "other"
+            if section_type in sections:
+                sections[section_type].append(topic)
+            else:
+                sections["other"].append(topic)
         
         return {
             "success": True,
@@ -128,12 +155,11 @@ async def get_catalog(doc_id: str):
             "counts": {
                 "chunks": doc.get("chunks_count", 0),
                 "tables": doc.get("tables_count", 0),
-                "topics": doc.get("topics_count", 0),
-                "keywords": doc.get("keywords_count", 0)
+                "topics": doc.get("topics_count", 0)
             },
             "tables": tables_with_urls,
-            "topics": topics,
-            "keywords": keywords
+            "topics": topics_with_urls,
+            "sections": sections
         }
     except HTTPException:
         raise
@@ -271,4 +297,30 @@ async def delete_doc(doc_id: str):
         raise
     except Exception as e:
         logger.error(f"Delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/query")
+async def query_documents(doc_id: str = Query(...), query: str = Query(...), top_k: int = Query(5)):
+    """Query a document using semantic search."""
+    try:
+        from app.services.query import query_document
+        
+        doc = get_document(doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        results = await query_document(doc_id, query, top_k)
+        
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "query": query,
+            "results": results,
+            "total": len(results)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Query error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

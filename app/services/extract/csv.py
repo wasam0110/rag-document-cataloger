@@ -48,23 +48,26 @@ async def extract_csv(file_path: Path, doc_id: str) -> Dict[str, Any]:
         result["tables"].append(table_entry)
         
         # Also create chunks from CSV content
-        text = "\n".join([",".join(row) for row in rows])
+        text = "\n".join([",".join(str(cell) for cell in row) for row in rows])
         result["chunks"] = create_chunks(text, doc_id)
         
         # Extract column names as topics
         if rows:
-            for col_name in rows[0]:
-                if col_name.strip():
+            for idx, col_name in enumerate(rows[0]):
+                if col_name and str(col_name).strip():
                     topic_id = str(uuid.uuid4())
                     result["topics"].append({
                         "topic_id": topic_id,
-                        "title": col_name.strip(),
+                        "title": f"Column: {str(col_name).strip()}",
+                        "section_type": None,
                         "start_page": 1,
                         "end_page": 1,
-                        "level": 1
+                        "level": 1,
+                        "chunk_ids": [],
+                        "content": ""
                     })
         
-        logger.info(f"Extracted CSV: {len(rows)} rows")
+        logger.info(f"Extracted CSV: {len(rows)} rows, {len(result['tables'])} tables")
         
     except Exception as e:
         logger.error(f"CSV extraction error: {e}")

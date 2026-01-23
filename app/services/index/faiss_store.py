@@ -29,7 +29,7 @@ def get_embeddings():
 
 def get_index_path(doc_id: str) -> Path:
     """Get the path for a document's FAISS index."""
-    return settings.faiss_dir / doc_id
+    return settings.faiss_index_dir / doc_id
 
 
 def create_index(doc_id: str, items: List[Dict[str, Any]]) -> bool:

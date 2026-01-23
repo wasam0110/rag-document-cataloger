@@ -5,6 +5,7 @@ Main FastAPI application entry point.
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 
 from app.api.routes import router as api_router
@@ -18,6 +19,15 @@ app = FastAPI(
     title="RAG Document Cataloger",
     description="Upload, catalog, and query documents with table extraction",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include API routes

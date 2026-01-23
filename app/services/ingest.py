@@ -5,6 +5,7 @@ Document ingestion service.
 import uuid
 from pathlib import Path
 from typing import Dict, Any
+from typing import List
 
 from fastapi import UploadFile
 
@@ -14,8 +15,7 @@ from app.db.sqlite import (
     save_document_metadata,
     save_chunks,
     save_tables,
-    save_topics,
-    save_keywords
+    save_topics
 )
 
 SUPPORTED_EXTENSIONS = {
@@ -65,9 +65,6 @@ async def ingest_document(file: UploadFile) -> str:
         
         if extracted.get("topics"):
             save_topics(doc_id, extracted["topics"])
-        
-        if extracted.get("keywords"):
-            save_keywords(doc_id, extracted["keywords"])
         
         # Build index
         if extracted.get("chunks"):
@@ -119,11 +116,98 @@ async def extract_content(file_path: Path, filetype: str, doc_id: str) -> Dict[s
 async def build_index(doc_id: str, chunks: list) -> bool:
     """Build FAISS index."""
     try:
-        from app.services.index.faiss_store import build_faiss_index
-        texts = [chunk.get("content", "") for chunk in chunks]
-        await build_faiss_index(doc_id, texts)
+        from app.services.index.faiss_store import create_index
+        
+        # Convert chunks to the format expected by create_index
+        items = []
+        for idx, chunk in enumerate(chunks):
+            items.append({
+                "item_id": chunk.get("chunk_id", f"chunk_{idx}"),
+                "text": chunk.get("content", ""),
+                "category": "chunk",
+                "page": chunk.get("page_number")
+            })
+        
+        create_index(doc_id, items)
         logger.info(f"Built index for {doc_id}")
         return True
     except Exception as e:
         logger.error(f"Index error: {e}")
         return False
+
+
+    # --- Backwards-compatible helper wrappers -------------------------------------------------
+    def extract_topics_from_text(pages: List[str], doc_id: str) -> List[Dict[str, Any]]:
+        """Compatibility wrapper: extract topics from a list of page texts."""
+        try:
+            text = "\n\n".join(pages)
+            # Prefer the TXT extractor which implements topic heuristics
+            from app.services.extract.txt import extract_topics as _extract_topics
+            return _extract_topics(text, doc_id)
+        except Exception:
+            return []
+
+
+    def extract_keywords_from_text(text: str, doc_id: str = None, top_n: int = 10) -> List[Dict[str, Any]]:
+        """Compatibility wrapper: extract keywords from a text string.
+
+        The original tests call this synchronously and expect a list of keyword dicts.
+        """
+        try:
+            # Many extractors expose `extract_keywords(text, doc_id)`; call TXT implementation.
+            from app.services.extract.txt import extract_keywords as _extract_keywords
+            # Some implementations expect a doc_id; pass an empty one if not provided
+            doc_id = doc_id or ""
+            kws = _extract_keywords(text, doc_id)
+            # Respect `top_n` if provided
+            return kws[:top_n]
+        except Exception:
+            return []
+
+
+    def detect_tables_in_text(pages: List[str], doc_id: str) -> List[Dict[str, Any]]:
+        """Simple heuristic table detector for plain text.
+
+        Detects contiguous lines that look like columnar data (multiple spaces or pipe separators).
+        """
+        import re
+        tables = []
+        table_index = 0
+
+        for page_num, page in enumerate(pages, start=1):
+            lines = page.splitlines()
+            buffer = []
+
+            for line in lines + [""]:  # sentinel to flush buffer at end
+                # Consider a line as table-like if it contains a pipe or multiple consecutive spaces/tabs
+                if re.search(r"\|", line) or re.search(r"\s{2,}", line):
+                    buffer.append(line.rstrip())
+                    continue
+
+                # Non-table line: if we have accumulated at least two table-like lines, emit a table
+                if len(buffer) >= 2:
+                    table_id = str(uuid.uuid4())
+                    table_text = "\n".join(buffer)
+                    rows_count = len(buffer)
+                    # Estimate columns by splitting the first line
+                    first = buffer[0]
+                    if "|" in first:
+                        cols_count = len([c for c in first.split("|") if c.strip()])
+                    else:
+                        cols_count = len(re.split(r"\s{2,}", first))
+
+                    tables.append({
+                        "table_id": table_id,
+                        "page_number": page_num,
+                        "table_index": table_index,
+                        "table_text": table_text,
+                        "rows_count": rows_count,
+                        "cols_count": cols_count,
+                        "confidence": 0.6
+                    })
+
+                    table_index += 1
+
+                buffer = []
+
+        return tables

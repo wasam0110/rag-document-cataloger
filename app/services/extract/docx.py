@@ -58,22 +58,42 @@ async def extract_docx(file_path: Path, doc_id: str) -> Dict[str, Any]:
         # Create chunks
         result["chunks"] = create_chunks(all_text, doc_id)
         
-        # Extract topics (headings)
+        # Extract topics (headings) with section detection
+        section_keywords = {
+            "abstract": ["abstract", "summary"],
+            "introduction": ["introduction", "overview"],
+            "background": ["background", "related work", "literature review"],
+            "methodology": ["methodology", "methods", "approach"],
+            "results": ["results", "findings", "experiments"],
+            "discussion": ["discussion", "analysis"],
+            "conclusion": ["conclusion", "summary", "future work"],
+            "references": ["references", "bibliography"]
+        }
+        
         for para in doc.paragraphs:
             if para.style.name.startswith('Heading'):
                 topic_id = str(uuid.uuid4())
+                title_lower = para.text.lower()
+                
+                # Detect section type
+                section_type = None
+                for sec_type, keywords in section_keywords.items():
+                    if any(kw in title_lower for kw in keywords):
+                        section_type = sec_type
+                        break
+                
                 result["topics"].append({
                     "topic_id": topic_id,
                     "title": para.text,
+                    "section_type": section_type,
                     "start_page": 1,
                     "end_page": 1,
-                    "level": int(para.style.name[-1]) if para.style.name[-1].isdigit() else 1
+                    "level": int(para.style.name[-1]) if para.style.name[-1].isdigit() else 1,
+                    "chunk_ids": [],
+                    "content": ""
                 })
         
-        # Extract keywords
-        result["keywords"] = extract_keywords(all_text, doc_id)
-        
-        logger.info(f"Extracted DOCX: {len(result['chunks'])} chunks, {len(result['tables'])} tables")
+        logger.info(f"Extracted DOCX: {len(result['chunks'])} chunks, {len(result['tables'])} tables, {len(result['topics'])} topics")
         
     except Exception as e:
         logger.error(f"DOCX extraction error: {e}")
@@ -134,32 +154,3 @@ def create_chunks(text: str, doc_id: str) -> List[Dict[str, Any]]:
         })
     
     return chunks
-
-
-def extract_keywords(text: str, doc_id: str) -> List[Dict[str, Any]]:
-    """Extract keywords."""
-    from collections import Counter
-    import re
-    
-    text_lower = text.lower()
-    words = re.findall(r'\b[a-z]{4,}\b', text_lower)
-    
-    stop_words = {
-        'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'has', 'had',
-        'her', 'was', 'one', 'our', 'out', 'this', 'that', 'with', 'have', 'from'
-    }
-    
-    words = [w for w in words if w not in stop_words]
-    word_counts = Counter(words)
-    
-    keywords = []
-    for word, count in word_counts.most_common(settings.max_keywords):
-        keyword_id = str(uuid.uuid4())
-        score = min(count / 10, 1.0)
-        keywords.append({
-            "keyword_id": keyword_id,
-            "keyword": word,
-            "score": score
-        })
-    
-    return keywords
