@@ -1,10 +1,10 @@
 # RAG Document Cataloger
 
-🚀 **A production-ready RAG (Retrieval-Augmented Generation) system with email authentication, intelligent document extraction, and AI-powered Q&A.**
+ **A production-ready RAG (Retrieval-Augmented Generation) system with email authentication, intelligent document extraction, and AI-powered Q&A.**
 
-## 🌟 Key Features
+##  Key Features
 
-### 📄 Document Processing
+###  Document Processing
 
 - **Multi-format support**: PDF, DOCX, TXT, CSV
 - **Intelligent extraction**:
@@ -14,7 +14,7 @@
   - Image/figure tracking
 - **Smart indexing**: FAISS vector store for lightning-fast semantic search
 
-### 🤖 RAG-Powered Q&A
+###  RAG-Powered Q&A
 
 - **State-of-the-art models**:
   - **Embeddings**: `BAAI/bge-base-en-v1.5` (768-dim, top retrieval quality)
@@ -23,14 +23,14 @@
 - **AI-generated answers**: Context-aware responses with automatic citations `[1], [2]`
 - **Interactive chat**: Ask questions and get comprehensive answers with source passages
 
-### 🔐 Secure Authentication
+###  Secure Authentication
 
 - **Email verification**: No passwords stored until verified
 - **JWT tokens**: Secure, stateless authentication
 - **SMTP integration**: Real email delivery (Gmail-ready)
 - **Session management**: Auto-logout, protected API endpoints
 
-### 🎨 Modern UI
+###  Modern UI
 
 - **Responsive design**: Works on desktop and mobile
 - **Dynamic sections**: Auto-detected document structure
@@ -38,7 +38,7 @@
 - **Expandable sources**: Toggle between answer and raw passages
 - **Real-time feedback**: Loading states, progress indicators
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Prerequisites
 
@@ -64,7 +64,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Configuration
+###  Configuration
 
 Create a `.env` file:
 
@@ -98,9 +98,9 @@ SECRET_KEY="your-secret-key-here"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-🌐 Open **http://127.0.0.1:8000** in your browser!
+ Open **http://127.0.0.1:8000** in your browser!
 
-## 📖 Usage
+##  Usage
 
 ### First-Time Setup
 
@@ -120,7 +120,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
    - _"What are the key findings?"_
 5. View the AI-generated answer with cited passages
 
-## 🧠 How RAG Works
+##  How RAG Works
 
 ```
 ┌─────────────┐
@@ -165,7 +165,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
     └──────────────┘
 ```
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Component          | Technology                      |
 | ------------------ | ------------------------------- |
@@ -179,7 +179,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 | **Extraction**     | pdfplumber, python-docx, pandas |
 | **Frontend**       | Vanilla JS + Modern CSS         |
 
-## 📊 Model Performance
+##  Model Performance
 
 | Model                     | Size | Quality    | Speed  | Use Case               |
 | ------------------------- | ---- | ---------- | ------ | ---------------------- |
@@ -191,7 +191,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 - `google/flan-t5-xxl` (11B) - Best quality, slower
 - `mistralai/Mistral-7B-Instruct-v0.2` - Excellent, 7B params
 
-## 🔧 Advanced Configuration
+##  Advanced Configuration
 
 ### Use GPU for Generation
 
@@ -212,7 +212,7 @@ CHUNK_OVERLAP="50"  # Larger = more continuity
 EMAIL_TEST_MODE="true"  # Codes logged instead of emailed
 ```
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 rag-document-cataloger/
