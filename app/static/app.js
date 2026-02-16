@@ -271,9 +271,6 @@ async function loadDocument(docId, filename) {
     document.getElementById('document-view').classList.remove('hidden');
     document.getElementById('document-title').textContent = filename;
 
-    // Ensure we're in content mode by default (chat hidden)
-    showDocumentContentMode();
-
     document.querySelectorAll('.document-item').forEach(function (item) {
         item.classList.remove('active');
         if (item.onclick && item.onclick.toString().indexOf(docId) !== -1) item.classList.add('active');

@@ -1,21 +1,23 @@
-"""
-Authentication routes for login with email verification.
+"""Authentication routes.
 
-Implements a two-step login flow:
-  1. POST /auth/register   – create account (email + password).
-  2. POST /auth/send-code  – validate password, email a 6-digit code.
-  3. POST /auth/verify-login – verify the code and issue a JWT.
-Also provides /auth/me (profile) and /auth/logout helpers.
+Email verification is required only once (first-time signup verification).
+
+Flow:
+    1. POST /auth/register      – create account, email a 6-digit verification code.
+    2. POST /auth/verify-login  – verify the code, mark user verified, issue a JWT.
+    3. POST /auth/login         – subsequent logins are password-only (no code).
+
+Also provides /auth/me and /auth/logout helpers.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 
-from app.models.schemas import UserLogin, Token, User
-from app.services.auth import authenticate_user, get_current_user
+from app.models.schemas import UserLogin, User
+from app.services.auth import create_access_token, get_current_user, verify_password
 from app.services.email_service import generate_verification_code, get_expiry_time, send_verification_email
-from app.db.sqlite import store_verification_code, verify_code
+from app.db.sqlite import get_user_by_email, set_user_verified, store_verification_code, update_user_login, verify_code
 from app.core.logging import logger
 from app.core.config import settings
 
@@ -49,6 +51,37 @@ class VerifyCodeRequest(BaseModel):
 # Route handlers
 # ──────────────────────────────────────────────
 
+
+@router.post("/login")
+async def login(request: UserLogin):
+    """Password-only login for already-verified users."""
+    user_dict = get_user_by_email(request.email)
+    if not user_dict:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    if not user_dict.get("hashed_password"):
+        raise HTTPException(status_code=401, detail="Please login using OAuth provider")
+
+    if not verify_password(request.password, user_dict["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    if int(user_dict.get("is_verified") or 0) != 1:
+        raise HTTPException(status_code=403, detail="Email not verified. Please verify your email first.")
+
+    update_user_login(user_dict["user_id"])
+    token = create_access_token(data={"sub": user_dict["user_id"], "email": user_dict["email"]})
+
+    response = JSONResponse(content={"access_token": token, "token_type": "bearer"})
+    response.set_cookie(
+        key="auth_token",
+        value=token,
+        httponly=False,        # frontend reads cookie token
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * 7,
+    )
+    return response
+
 @router.post("/register")
 async def register(request: RegisterRequest):
     """Register a new user account.
@@ -57,7 +90,7 @@ async def register(request: RegisterRequest):
     meets minimum-length requirements, then stores a hashed password.
     """
     try:
-        from app.db.sqlite import get_user_by_email, create_user
+        from app.db.sqlite import create_user
         from app.services.auth import get_password_hash
         import uuid
         
@@ -89,9 +122,28 @@ async def register(request: RegisterRequest):
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to create account")
-        
-        logger.info(f"User registered successfully: {request.email}")
-        return {"message": "Account created successfully. You can now login.", "email": request.email}
+
+        # Send first-time verification code
+        code = generate_verification_code()
+        expires_at = get_expiry_time(minutes=10)
+        if not store_verification_code(request.email, code, expires_at):
+            raise HTTPException(status_code=500, detail="Failed to store verification code")
+
+        if settings.email_test_mode:
+            logger.info(f"TEST MODE: Verification code for {request.email}: {code}")
+        else:
+            if not send_verification_email(request.email, code):
+                raise HTTPException(status_code=500, detail="Failed to send verification email")
+
+        logger.info(f"User registered successfully (verification pending): {request.email}")
+        payload = {
+            "message": "Account created. Verification code sent.",
+            "email": request.email,
+            "needs_verification": True,
+        }
+        if settings.email_test_mode:
+            payload["test_code"] = code
+        return payload
         
     except HTTPException:
         raise  # Re-raise known HTTP errors without wrapping
@@ -111,8 +163,6 @@ async def send_code(request: SendCodeRequest):
       4. Email the code (or log it in test mode).
     """
     try:
-        from app.db.sqlite import get_user_by_email
-        
         logger.info(f"Send code request for: {request.email}")
         
         # Ensure the user has a registered account
@@ -120,15 +170,16 @@ async def send_code(request: SendCodeRequest):
         if not user:
             logger.error(f"User not found: {request.email}")
             raise HTTPException(status_code=401, detail="Email not registered. Please sign up first.")
+
+        # Only allow verification codes for users who are not yet verified
+        if int(user.get("is_verified") or 0) == 1:
+            raise HTTPException(status_code=400, detail="Email already verified. Please sign in with password.")
         
         # Re-verify the password before sending a code to prevent abuse
-        login_data = UserLogin(email=request.email, password=request.password)
-        try:
-            logger.info(f"Authenticating user: {request.email}")
-            authenticate_user(login_data)  # Raises HTTPException on failure
-            logger.info(f"Authentication successful for: {request.email}")
-        except HTTPException as e:
-            logger.error(f"Authentication failed for {request.email}: {e.detail}")
+        if not user.get("hashed_password"):
+            raise HTTPException(status_code=401, detail="Please login using OAuth provider")
+
+        if not verify_password(request.password, user["hashed_password"]):
             raise HTTPException(status_code=401, detail="Incorrect password")
         
         # Generate a random 6-digit verification code
@@ -165,27 +216,29 @@ async def send_code(request: SendCodeRequest):
 
 @router.post("/verify-login")
 async def verify_and_login(request: VerifyCodeRequest):
-    """Verify the emailed code and complete login by issuing a JWT.
+    """Verify the emailed code and complete verification by issuing a JWT.
 
     If the code is valid and not expired, the endpoint returns a bearer
     access token that the client stores for subsequent authenticated requests.
     """
     try:
-        # Check the code against the database (also marks it as used)
-        if not verify_code(request.email, request.code):
-            raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-        
-        # Code is valid – look up the user and create a JWT
-        from app.db.sqlite import get_user_by_email, update_user_login
-        from app.services.auth import create_access_token
-        
         user = get_user_by_email(request.email)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        
-        # Record this login time
+
+        if int(user.get("is_verified") or 0) == 1:
+            raise HTTPException(status_code=400, detail="Email already verified. Please sign in with password.")
+
+        # Check the code against the database (also marks it as used)
+        if not verify_code(request.email, request.code):
+            raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+        # Mark verified
+        if not set_user_verified(request.email, True):
+            raise HTTPException(status_code=500, detail="Failed to update verification status")
+
         update_user_login(user['user_id'])
-        
+
         # Build the JWT with user_id as "sub" (subject) claim
         token = create_access_token(data={"sub": user['user_id'], "email": user['email']})
         

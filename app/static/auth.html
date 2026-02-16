@@ -335,9 +335,7 @@
 
       <div class="page-title">
         <h2 id="page-title-text">Sign In to Your Account</h2>
-        <p id="page-subtitle">
-          Enter your credentials to receive a verification code
-        </p>
+        <p id="page-subtitle">Enter your email and password to sign in</p>
       </div>
 
       <div id="error-message" class="error-message"></div>
@@ -387,7 +385,7 @@
             <label for="remember-me">Remember me — stay signed in</label>
           </div>
           <button type="submit" class="btn btn-primary" id="auth-btn">
-            Send Verification Code
+            Sign In
           </button>
         </form>
       </div>
@@ -441,6 +439,7 @@
       const API_BASE = "/auth";
       let currentEmail = "";
       let isSignupMode = false; // Track if we're in signup or login mode
+      let pendingVerificationFromSignup = false;
 
       // Auto-redirect if already authenticated
       (function checkExistingAuth() {
@@ -481,6 +480,7 @@
 
       function toggleMode() {
         isSignupMode = !isSignupMode;
+        pendingVerificationFromSignup = false;
         const titleEl = document.getElementById("page-title-text");
         const subtitleEl = document.getElementById("page-subtitle");
         const authBtn = document.getElementById("auth-btn");
@@ -494,9 +494,8 @@
           toggleBtn.textContent = "Already have an account? Sign In";
         } else {
           titleEl.textContent = "Sign In to Your Account";
-          subtitleEl.textContent =
-            "Enter your credentials to receive a verification code";
-          authBtn.textContent = "Send Verification Code";
+          subtitleEl.textContent = "Enter your email and password to sign in";
+          authBtn.textContent = "Sign In";
           toggleBtn.textContent = "Don't have an account? Sign Up";
         }
         hideMessages();
@@ -521,7 +520,19 @@
         if (isSignupMode) {
           await handleRegister(email, password);
         } else {
-          await handleSendCode(email, password);
+          await handlePasswordLogin(email, password);
+        }
+      }
+
+      function persistToken(token) {
+        const rememberMe = document.getElementById("remember-me").checked;
+
+        localStorage.setItem("token", token);
+
+        if (rememberMe) {
+          document.cookie = `auth_token=${token}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
+        } else {
+          document.cookie = `auth_token=${token}; path=/; SameSite=Lax`;
         }
       }
 
@@ -541,13 +552,18 @@
           const data = await response.json();
 
           if (response.ok) {
-            showSuccess("Account created! Now sending verification code...");
-
-            // Automatically switch to login mode and send code
-            setTimeout(async () => {
-              isSignupMode = false;
-              await handleSendCode(email, password);
-            }, 1500);
+            pendingVerificationFromSignup = true;
+            showSuccess(
+              "Account created! Verification code sent. Check your email.",
+            );
+            document.getElementById("user-email").textContent = email;
+            setTimeout(() => {
+              showStep(2);
+              document.getElementById("page-title-text").textContent =
+                "Enter Verification Code";
+              document.getElementById("page-subtitle").textContent =
+                "Check your email for the 6-digit code";
+            }, 800);
           } else {
             showError(data.detail || "Registration failed. Please try again.");
             authBtn.disabled = false;
@@ -558,6 +574,47 @@
           authBtn.disabled = false;
           authBtn.textContent = "Create Account";
         } finally {
+          showLoading(false);
+        }
+      }
+
+      async function handlePasswordLogin(email, password) {
+        const authBtn = document.getElementById("auth-btn");
+        authBtn.disabled = true;
+        authBtn.textContent = "Signing in...";
+        showLoading(true, "Signing you in...");
+
+        try {
+          const response = await fetch(`${API_BASE}/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            persistToken(data.access_token);
+            showSuccess("Login successful! Redirecting...");
+            setTimeout(() => {
+              window.location.href = "/static/index.html";
+            }, 800);
+            return;
+          }
+
+          // If the account exists but isn't verified, guide user through verification
+          if (response.status === 403) {
+            showSuccess("Email not verified. Sending verification code...");
+            await handleSendCode(email, password);
+            return;
+          }
+
+          showError(data.detail || "Login failed. Please try again.");
+        } catch (error) {
+          showError("Network error. Please try again.");
+        } finally {
+          authBtn.disabled = false;
+          authBtn.textContent = isSignupMode ? "Create Account" : "Sign In";
           showLoading(false);
         }
       }
@@ -590,16 +647,12 @@
           } else {
             showError(data.detail || "Failed to send code. Please try again.");
             authBtn.disabled = false;
-            authBtn.textContent = isSignupMode
-              ? "Create Account"
-              : "Send Verification Code";
+            authBtn.textContent = isSignupMode ? "Create Account" : "Sign In";
           }
         } catch (error) {
           showError("Network error. Please try again.");
           authBtn.disabled = false;
-          authBtn.textContent = isSignupMode
-            ? "Create Account"
-            : "Send Verification Code";
+          authBtn.textContent = isSignupMode ? "Create Account" : "Sign In";
         } finally {
           showLoading(false);
         }
@@ -629,20 +682,9 @@
           const data = await response.json();
 
           if (response.ok) {
-            const rememberMe = document.getElementById("remember-me").checked;
             const token = data.access_token;
 
-            // Always store in localStorage for JS access
-            localStorage.setItem("token", token);
-
-            // Cookie is set by server, but also set on client for reliability
-            if (rememberMe) {
-              // 30 days for Remember Me
-              document.cookie = `auth_token=${token}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
-            } else {
-              // Session cookie (expires when browser closes)
-              document.cookie = `auth_token=${token}; path=/; SameSite=Lax`;
-            }
+            persistToken(token);
 
             showSuccess("Login successful! Redirecting...");
             setTimeout(() => {
@@ -699,16 +741,30 @@
 
       function backToStep1() {
         showStep(1);
-        document.getElementById("page-title-text").textContent =
-          "Sign In to Your Account";
-        document.getElementById("page-subtitle").textContent =
-          "Enter your credentials to receive a verification code";
+        const titleEl = document.getElementById("page-title-text");
+        const subtitleEl = document.getElementById("page-subtitle");
+        const authBtn = document.getElementById("auth-btn");
+
+        if (pendingVerificationFromSignup) {
+          isSignupMode = true;
+          titleEl.textContent = "Create Your Account";
+          subtitleEl.textContent =
+            "Sign up to get started with Document Cataloger";
+          authBtn.textContent = "Create Account";
+          document.getElementById("toggle-mode-btn").textContent =
+            "Already have an account? Sign In";
+        } else {
+          isSignupMode = false;
+          titleEl.textContent = "Sign In to Your Account";
+          subtitleEl.textContent = "Enter your email and password to sign in";
+          authBtn.textContent = "Sign In";
+          document.getElementById("toggle-mode-btn").textContent =
+            "Don't have an account? Sign Up";
+        }
+
         document.getElementById("email").value = currentEmail;
         document.getElementById("code").value = "";
-        document.getElementById("auth-btn").disabled = false;
-        document.getElementById("auth-btn").textContent =
-          "Send Verification Code";
-        isSignupMode = false;
+        authBtn.disabled = false;
       }
 
       // Auto-format code input (optional)

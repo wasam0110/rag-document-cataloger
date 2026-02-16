@@ -31,8 +31,9 @@ numpy>=1.23.0                  # Numerical computing
 # --- Vector Store ---
 faiss-cpu>=1.7.4               # FAISS vector similarity search
 
-# --- AI Generation (Groq API) ---
-groq>=0.4.0                    # Groq API client for LLM generation
+# --- AI Generation (LLM APIs) ---
+groq>=0.4.0                    # Groq API client for LLM generation (Llama 3.3 70B)
+google-generativeai>=0.8.0     # Google Gemini API client (gemini-2.0-flash)
 
 # --- Database ---
 python-dotenv>=1.0.0           # .env file loading

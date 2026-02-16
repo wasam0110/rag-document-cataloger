@@ -54,6 +54,7 @@ def init_db():
             oauth_provider TEXT,
             oauth_id TEXT,
             full_name TEXT,
+            is_verified INTEGER DEFAULT 0,
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP
@@ -158,6 +159,13 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_images_doc_id ON images(doc_id)")
     
     # ── Schema migrations for existing databases ────────────────────
+    # Add is_verified column if the table was created before email verification was added
+    try:
+        cursor.execute("SELECT is_verified FROM users LIMIT 1")
+    except sqlite3.OperationalError:
+        logger.info("Migrating users table: adding is_verified column")
+        cursor.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0")
+
     # Add user_id column if the table was created before auth was added
     try:
         cursor.execute("SELECT user_id FROM documents LIMIT 1")
@@ -543,6 +551,23 @@ def update_user_login(user_id: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error updating user login: {e}")
+        return False
+
+
+def set_user_verified(email: str, verified: bool = True) -> bool:
+    """Mark a user as email-verified (or not verified) by email address."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET is_verified = ? WHERE email = ?",
+            (1 if verified else 0, email),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user verification status: {e}")
         return False
 
 

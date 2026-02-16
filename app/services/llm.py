@@ -1,44 +1,70 @@
 """
-LLM wrapper using Groq API for fast, high-quality generation in the RAG pipeline.
+LLM wrapper using Groq or Gemini API for high-quality generation in the RAG pipeline.
 
-Uses Groq's free API with Llama 3.3 70B Versatile - one of the best free
-models available. Falls back to simple keyword-based responses if the API
-key is not configured or the service is unavailable.
+Supports two free API options with automatic fallback:
+1. Groq (Llama 3.3 70B Versatile) - Fast and powerful
+2. Google Gemini (gemini-2.0-flash-exp) - Free and high-quality
 
-Set the GROQ_API_KEY environment variable (or add it to .env) to enable.
+Priority: Groq → Gemini → Simple keyword-based responses
+Set GROQ_API_KEY or GEMINI_API_KEY in .env to enable.
 """
 
 import os
-from typing import List
+from typing import List, Optional, Tuple
 from app.core.logging import logger
 
-# Groq client - lazily initialized
-_client = None
+# LLM clients - lazily initialized
+_groq_client = None
+_gemini_model = None
+_active_provider = None  # 'groq', 'gemini', or None
 
 
-def _get_client():
-    """Lazily create and return a Groq client."""
-    global _client
-    if _client is not None:
-        return _client
-
-    api_key = os.getenv("GROQ_API_KEY", "")
-    if not api_key:
-        logger.warning("GROQ_API_KEY not set - AI answers will be limited")
-        return None
-
-    try:
-        from groq import Groq
-        _client = Groq(api_key=api_key)
-        logger.info("Groq client initialized (llama-3.3-70b-versatile)")
-        return _client
-    except Exception as e:
-        logger.error(f"Failed to initialize Groq client: {e}")
-        return None
+def _get_llm_client() -> Tuple[Optional[object], str]:
+    """Lazily initialize and return the best available LLM client.
+    
+    Returns:
+        Tuple of (client/model, provider_name)
+    """
+    global _groq_client, _gemini_model, _active_provider
+    
+    # Return cached client if available
+    if _active_provider == 'groq' and _groq_client:
+        return (_groq_client, 'groq')
+    if _active_provider == 'gemini' and _gemini_model:
+        return (_gemini_model, 'gemini')
+    
+    # Try Groq first
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        try:
+            from groq import Groq
+            _groq_client = Groq(api_key=groq_key)
+            _active_provider = 'groq'
+            logger.info("✅ Groq client initialized (llama-3.3-70b-versatile)")
+            return (_groq_client, 'groq')
+        except Exception as e:
+            logger.warning(f"Groq initialization failed: {e}, trying Gemini...")
+    
+    # Try Gemini as fallback
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            _gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            _active_provider = 'gemini'
+            logger.info("✅ Gemini client initialized (gemini-2.0-flash-exp)")
+            return (_gemini_model, 'gemini')
+        except Exception as e:
+            logger.warning(f"Gemini initialization failed: {e}")
+    
+    logger.warning("⚠️  No LLM API key found (GROQ_API_KEY or GEMINI_API_KEY) - AI answers will be limited")
+    _active_provider = None
+    return (None, 'none')
 
 
 def generate_answer(retrieved_texts: List[str], question: str, max_tokens: int = 1024) -> str:
-    """Generate an answer using retrieved context + user question via Groq API.
+    """Generate an answer using retrieved context + user question via Groq or Gemini API.
 
     Args:
         retrieved_texts: Ordered list of context passages (most relevant first).
@@ -51,7 +77,7 @@ def generate_answer(retrieved_texts: List[str], question: str, max_tokens: int =
     if not retrieved_texts:
         return "I couldn't find relevant information in the document to answer this question."
 
-    client = _get_client()
+    client, provider = _get_llm_client()
 
     # Build context from top passages
     context_blocks = []
@@ -63,41 +89,58 @@ def generate_answer(retrieved_texts: List[str], question: str, max_tokens: int =
         # Fallback: return a summary of retrieved passages without LLM
         return _fallback_answer(retrieved_texts, question)
 
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a helpful document assistant. Answer the question based ONLY on "
-                        "the provided context passages. Be comprehensive, clear and accurate. "
-                        "When referencing information, cite the passage number in brackets like [1] or [2]. "
-                        "If the context doesn't contain enough information to answer, say so honestly."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": f"Context passages:\n\n{context}\n\nQuestion: {question}"
-                }
-            ],
-            temperature=0.3,
-            max_tokens=max_tokens,
-            top_p=0.9,
-        )
+    # System prompt for both providers
+    system_prompt = (
+        "You are a helpful document assistant. Answer the question based ONLY on "
+        "the provided context passages. Be comprehensive, clear and accurate. "
+        "Use bullet points to organize information clearly. "
+        "When referencing information, cite the passage number in brackets like [1] or [2]. "
+        "If the context doesn't contain enough information to answer, say so honestly."
+    )
+    
+    user_prompt = f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer clearly with bullet points where helpful:"
 
-        answer = response.choices[0].message.content.strip()
+    try:
+        if provider == 'groq':
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=max_tokens,
+                top_p=0.9,
+            )
+            answer = response.choices[0].message.content.strip()
+            
+        elif provider == 'gemini':
+            # Gemini uses a simpler API - combine system + user prompt
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            response = client.generate_content(
+                full_prompt,
+                generation_config={
+                    "temperature": 0.3,
+                    "max_output_tokens": max_tokens,
+                }
+            )
+            answer = response.text.strip()
+        else:
+            return _fallback_answer(retrieved_texts, question)
+
         if not answer or len(answer) < 10:
             return _fallback_answer(retrieved_texts, question)
+        
+        logger.info(f"✅ Answer generated using {provider}")
         return answer
 
     except Exception as e:
-        logger.error(f"Groq generation error: {e}")
+        logger.error(f"{provider.title()} generation error: {e}")
         return _fallback_answer(retrieved_texts, question)
 
 
 def _fallback_answer(retrieved_texts: List[str], question: str) -> str:
-    """Simple fallback when the Groq API is unavailable."""
+    """Simple fallback when LLM APIs (Groq/Gemini) are unavailable."""
     if not retrieved_texts:
         return "No relevant information found."
 
@@ -109,7 +152,7 @@ def _fallback_answer(retrieved_texts: List[str], question: str) -> str:
 
 
 def categorize_heading(heading_text: str) -> str:
-    """Use AI to categorize a document heading into a standard section type.
+    """Use AI (Groq or Gemini) to categorize a document heading into a standard section type.
 
     Args:
         heading_text: The heading text to categorize.
@@ -126,35 +169,47 @@ def categorize_heading(heading_text: str) -> str:
         'references', 'appendix', 'acknowledgments'
     }
 
-    # Try Groq first for accurate categorization
-    client = _get_client()
+    # Try LLM (Groq or Gemini) for accurate categorization
+    client, provider = _get_llm_client()
     if client:
+        system_msg = (
+            "Categorize the following document section heading into exactly ONE of these types: "
+            "abstract, introduction, related work, methodology, model, results, discussion, "
+            "conclusion, references, appendix, acknowledgments. "
+            "Respond with ONLY the category name in lowercase, nothing else."
+        )
+        
         try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Categorize the following document section heading into exactly ONE of these types: "
-                            "abstract, introduction, related work, methodology, model, results, discussion, "
-                            "conclusion, references, appendix, acknowledgments. "
-                            "Respond with ONLY the category name in lowercase, nothing else."
-                        )
-                    },
-                    {"role": "user", "content": heading_text}
-                ],
-                temperature=0,
-                max_tokens=10,
-            )
-            category = response.choices[0].message.content.strip().lower()
-            if category in valid_categories:
+            if provider == 'groq':
+                response = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": heading_text}
+                    ],
+                    temperature=0,
+                    max_tokens=10,
+                )
+                category = response.choices[0].message.content.strip().lower()
+            elif provider == 'gemini':
+                prompt = f"{system_msg}\n\nHeading: {heading_text}\n\nCategory:"
+                response = client.generate_content(
+                    prompt,
+                    generation_config={"temperature": 0, "max_output_tokens": 10}
+                )
+                category = response.text.strip().lower()
+            else:
+                category = None
+            
+            if category and category in valid_categories:
                 return category
-            for cat in valid_categories:
-                if cat in category:
-                    return cat
+            # Check if any valid category is in the response
+            if category:
+                for cat in valid_categories:
+                    if cat in category:
+                        return cat
         except Exception as e:
-            logger.warning(f"Groq categorization failed: {e}")
+            logger.warning(f"{provider.title()} categorization failed: {e}")
 
     # Keyword-based fallback
     heading_lower = heading_text.lower()
