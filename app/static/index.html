@@ -8,7 +8,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=5" />
   </head>
   <body>
     <div class="app-container">
@@ -138,31 +138,6 @@
           <div class="tab-contents" id="tab-contents">
             <!-- Content will be dynamically generated -->
           </div>
-
-          <!-- AI Chat -->
-          <div class="chat-section">
-            <div class="chat-header">
-              <h3>AI Assistant</h3>
-              <p>Ask questions about this document</p>
-            </div>
-            <div id="chat-messages" class="chat-messages">
-              <div class="chat-welcome">
-                <p>
-                  Ask me anything about this document. I can help you understand
-                  the content, find specific information, or summarize sections.
-                </p>
-              </div>
-            </div>
-            <div class="chat-input-area">
-              <input
-                type="text"
-                id="chat-input"
-                placeholder="Ask a question about this document..."
-                autocomplete="off"
-              />
-              <button id="chat-send" class="btn btn-primary">Send</button>
-            </div>
-          </div>
         </div>
       </main>
     </div>
@@ -217,6 +192,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=5"></script>
   </body>
 </html>

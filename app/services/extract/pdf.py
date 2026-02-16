@@ -1,6 +1,14 @@
 """
 PDF extraction with semantic chunking and intelligent section detection.
-Uses sentence-transformers for semantic understanding.
+
+Uses pdfplumber for text / table extraction and PIL for table image rendering.
+When LangChain's RecursiveCharacterTextSplitter is available it is used for
+semantic-aware chunking; otherwise a basic sentence-based fallback is used.
+
+Pipeline:
+  1. Iterate over each PDF page – extract images, text, and tables.
+  2. Chunk the full text using sentence-boundary-aware splitting.
+  3. Detect section headings with strict validation to avoid noise.
 """
 
 import uuid
@@ -13,7 +21,7 @@ from PIL import Image
 from app.core.config import settings
 from app.core.logging import logger
 
-# Try to import advanced text splitter
+# LangChain's text splitter is optional – fall back to basic chunking if absent
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     HAS_LANGCHAIN = True
@@ -23,8 +31,12 @@ except ImportError:
 
 
 async def extract_pdf(file_path: Path, doc_id: str) -> Dict[str, Any]:
-    """Extract content from PDF with intelligent section detection."""
+    """Extract content from a PDF with intelligent section detection.
+
+    Returns a dict with keys: chunks, tables, topics, keywords, images, categories.
+    """
     logger.info(f"Starting PDF extraction for {file_path.name}")
+    # Initialize the result container with empty lists for each artifact type
     result = {
         "chunks": [],
         "tables": [],
@@ -37,11 +49,11 @@ async def extract_pdf(file_path: Path, doc_id: str) -> Dict[str, Any]:
     try:
         with pdfplumber.open(file_path) as pdf:
             logger.info(f"PDF opened: {len(pdf.pages)} pages")
-            all_text = ""
-            page_texts = []
+            all_text = ""        # Accumulate full document text
+            page_texts = []      # Per-page text for chunking
             
             for page_num, page in enumerate(pdf.pages, start=1):
-                # Extract images
+                # ── Extract embedded image metadata from the page ───
                 try:
                     for img_idx, img_obj in enumerate(page.images):
                         image_id = str(uuid.uuid4())
@@ -57,19 +69,19 @@ async def extract_pdf(file_path: Path, doc_id: str) -> Dict[str, Any]:
                 except Exception as e:
                     logger.warning(f"Image extraction failed on page {page_num}: {e}")
                 
-                # Extract text
+                # ── Extract the page’s plain text ──────────────────────
                 page_text = page.extract_text() or ""
                 page_texts.append({"page_num": page_num, "text": page_text})
-                all_text += page_text + "\n\n"
+                all_text += page_text + "\n\n"  # Separate pages with blank line
                 
-                # Extract tables
+                # ── Detect and extract tables from the page ───────────
                 tables = extract_tables_from_page(page, doc_id, page_num)
                 result["tables"].extend(tables)
             
-            # Create semantic chunks
+            # ── Create semantically meaningful chunks from page texts ─
             result["chunks"] = create_semantic_chunks(page_texts, doc_id)
             
-            # Extract sections with strict validation
+            # ── Detect section headings and classify them ─────────────
             result["topics"], result["categories"] = extract_validated_sections(
                 page_texts, doc_id, result["chunks"]
             )
@@ -86,36 +98,46 @@ async def extract_pdf(file_path: Path, doc_id: str) -> Dict[str, Any]:
 
 
 def extract_tables_from_page(page, doc_id: str, page_num: int) -> List[Dict]:
-    """Extract tables from a PDF page."""
+    """Detect and extract tables from a single PDF page.
+
+    Uses pdfplumber’s line-based strategy first; falls back to the
+    default strategy if no tables are found.  Each valid table gets a
+    markdown text representation and optional PNG images (full + thumbnail).
+    """
     tables = []
     
     try:
+        # Configure extraction: prefer line-based detection (more accurate)
         table_settings = {
             "vertical_strategy": "lines",
             "horizontal_strategy": "lines",
-            "snap_tolerance": 3,
-            "join_tolerance": 3,
+            "snap_tolerance": 3,   # Pixel tolerance for aligning lines
+            "join_tolerance": 3,   # Pixel tolerance for merging close lines
         }
         
+        # First attempt with explicit line strategy
         extracted = page.extract_tables(table_settings)
         if not extracted:
+            # Fallback to default (text-based) strategy
             extracted = page.extract_tables()
         
         if extracted:
             for table_idx, table_data in enumerate(extracted):
+                # Skip tables with fewer than 2 rows (header + at least one data row)
                 if not table_data or len(table_data) < 2:
                     continue
                 
-                # Filter empty rows
+                # Remove rows that are entirely empty / whitespace
                 valid_rows = [row for row in table_data 
                              if any(cell and str(cell).strip() for cell in row)]
                 if len(valid_rows) < 2:
                     continue
                 
                 table_id = str(uuid.uuid4())
+                # Render the table as a markdown-formatted string
                 table_text = format_table_markdown(valid_rows)
                 
-                # Try to save table image
+                # Render the full page as a PNG and create a thumbnail
                 table_images = save_table_image(page, doc_id, table_id, page_num)
                 
                 tables.append({
@@ -137,7 +159,12 @@ def extract_tables_from_page(page, doc_id: str, page_num: int) -> List[Dict]:
 
 
 def format_table_markdown(table_data: List[List[str]]) -> str:
-    """Convert table to markdown format."""
+    """Convert a 2-D list of cells into a GitHub-flavoured Markdown table.
+
+    The first row is treated as the header; a separator row of '---' is
+    inserted automatically.  Short data rows are padded to match the
+    header width.
+    """
     if not table_data:
         return ""
     
@@ -156,21 +183,28 @@ def format_table_markdown(table_data: List[List[str]]) -> str:
 
 
 def save_table_image(page, doc_id: str, table_id: str, page_num: int) -> Dict[str, str]:
-    """Save table page as image."""
+    """Render the PDF page as a PNG and create a thumbnail for the table.
+
+    Both images are saved under ``data/table_images/<doc_id>/`` and their
+    relative paths are returned for storage in the DB.
+    """
     result = {"full_image_path": None, "preview_image_path": None}
     
     try:
+        # Create a per-document subdirectory for table images
         table_dir = settings.data_dir / "table_images" / doc_id
         table_dir.mkdir(parents=True, exist_ok=True)
         
+        # Render the page to a PIL Image at 150 DPI
         img = page.to_image(resolution=150)
-        pil_img = img.original
+        pil_img = img.original  # Access the underlying PIL.Image
         
+        # Save full-resolution image
         full_path = table_dir / f"{table_id}_full.png"
         pil_img.save(full_path)
         result["full_image_path"] = f"table_images/{doc_id}/{table_id}_full.png"
         
-        # Thumbnail
+        # Create a 300px-wide thumbnail preserving aspect ratio
         width, height = pil_img.size
         thumb_width = 300
         thumb_height = int((thumb_width / width) * height)
@@ -186,16 +220,21 @@ def save_table_image(page, doc_id: str, table_id: str, page_num: int) -> Dict[st
 
 
 def create_semantic_chunks(page_texts: List[Dict], doc_id: str) -> List[Dict[str, Any]]:
-    """
-    Create semantic chunks using sentence-aware splitting.
-    This preserves meaning better than arbitrary character splits.
+    """Split page texts into semantically meaningful chunks.
+
+    Prefers LangChain’s RecursiveCharacterTextSplitter which splits at
+    natural boundaries (paragraphs → sentences → words) and preserves
+    overlap between consecutive chunks for context continuity.
+    Falls back to a simpler sentence-based splitter if LangChain is absent.
     """
     chunks = []
     chunk_size = settings.chunk_size
     chunk_overlap = settings.chunk_overlap
     
     if HAS_LANGCHAIN:
-        # Use semantic-aware splitter with sentence boundaries
+        # Configure the splitter with a hierarchy of separators.
+        # It tries the first separator; if the resulting pieces are still
+        # too large, it falls through to finer-grained separators.
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -222,14 +261,15 @@ def create_semantic_chunks(page_texts: List[Dict], doc_id: str) -> List[Dict[str
             if not text or not text.strip():
                 continue
             
-            # Clean text before splitting
+            # Remove PDF artifacts (multiple spaces, stray page numbers, etc.)
             text = clean_text(text)
             
             page_chunks = text_splitter.split_text(text)
             
             for chunk_text in page_chunks:
                 chunk_text = chunk_text.strip()
-                if chunk_text and len(chunk_text) > 20:  # Skip tiny chunks
+                # Discard very short chunks – they rarely carry useful meaning
+                if chunk_text and len(chunk_text) > 20:
                     chunk_id = str(uuid.uuid4())
                     chunks.append({
                         "chunk_id": chunk_id,
@@ -248,19 +288,21 @@ def create_semantic_chunks(page_texts: List[Dict], doc_id: str) -> List[Dict[str
 
 
 def clean_text(text: str) -> str:
-    """Clean text by removing artifacts and normalizing spacing."""
-    # Remove multiple spaces
-    text = re.sub(r' +', ' ', text)
-    # Remove multiple newlines
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    # Remove page numbers at start/end
-    text = re.sub(r'^\s*\d+\s*$', '', text, flags=re.MULTILINE)
+    """Remove common PDF artifacts and normalize whitespace."""
+    text = re.sub(r' +', ' ', text)                        # Collapse multiple spaces
+    text = re.sub(r'\n{3,}', '\n\n', text)                 # Limit consecutive newlines to 2
+    text = re.sub(r'^\s*\d+\s*$', '', text, flags=re.MULTILINE)  # Strip standalone page numbers
     return text.strip()
 
 
 def fallback_sentence_chunking(page_texts: List[Dict], doc_id: str, 
                                chunk_size: int, chunk_overlap: int) -> List[Dict]:
-    """Fallback sentence-based chunking without LangChain."""
+    """Sentence-based chunking fallback when LangChain is not installed.
+
+    Splits text at sentence-ending punctuation, accumulates sentences
+    until ``chunk_size`` is reached, then starts a new chunk with an
+    overlap of approximately 20 words from the previous chunk.
+    """
     chunks = []
     chunk_index = 0
     
@@ -314,14 +356,16 @@ def extract_validated_sections(
     doc_id: str, 
     chunks: List[Dict]
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """
-    Extract sections with STRICT validation to avoid noise.
-    Only detect actual section headings, not random text/numbers.
+    """Detect section headings with STRICT validation to avoid noise.
+
+    Only text lines that closely match known academic headings or follow
+    a numbered-heading pattern (e.g. '2.1 Methods') are accepted.
+    Returns a tuple of (topics_list, sorted_categories).
     """
     topics = []
     discovered_categories = set()
     
-    # Standard academic sections (high confidence)
+    # Map of canonical section types → keyword variants used to match them
     standard_sections = {
         'abstract': ['abstract', 'summary', 'executive summary'],
         'introduction': ['introduction', 'overview', 'background'],
@@ -387,7 +431,13 @@ def extract_validated_sections(
                 # Check if it maps to a standard section
                 section_type = detect_standard_section(heading_text, standard_sections)
                 if not section_type:
-                    section_type = normalize_category(heading_text)
+                    # Try AI-powered categorization as fallback
+                    try:
+                        from app.services.llm import categorize_heading
+                        section_type = categorize_heading(heading_text)
+                    except Exception as e:
+                        logger.warning(f"LLM categorization failed: {e}, using fallback")
+                        section_type = normalize_category(heading_text)
                 
                 discovered_categories.add(section_type)
                 
@@ -426,7 +476,11 @@ def extract_validated_sections(
 
 
 def is_noise_line(line: str) -> bool:
-    """Check if a line is noise (numbers, coordinates, etc.)."""
+    """Heuristically determine if a line is noise (page numbers, coordinates, etc.).
+
+    A line is considered noise when it is predominantly digits, matches
+    common non-heading patterns, or lacks enough alphabetic characters.
+    """
     # Skip lines that are mostly numbers
     digits = sum(c.isdigit() for c in line)
     if len(line) > 0 and digits / len(line) > 0.5:
@@ -461,7 +515,11 @@ def is_noise_line(line: str) -> bool:
 
 
 def detect_standard_section(line: str, standard_sections: Dict) -> str:
-    """Detect if line matches a standard section."""
+    """Match a text line against the standard section keyword map.
+
+    Leading numbers / punctuation are stripped before comparison so that
+    headings like '3. Results' still match 'results'.
+    """
     line_lower = line.lower().strip()
     
     # Remove leading numbers/punctuation for matching
@@ -477,14 +535,13 @@ def detect_standard_section(line: str, standard_sections: Dict) -> str:
 
 
 def is_numbered_heading(line: str) -> bool:
-    """Check if line is a numbered heading like '1 Introduction' or '2.1 Methods'."""
-    # Pattern: number(s) followed by text
+    """Return True if the line follows a numbered heading pattern (e.g. '1 Introduction', '2.1 Methods')."""
     pattern = r'^(\d+(?:\.\d+)*)\s+([A-Za-z].+)$'
     return bool(re.match(pattern, line))
 
 
 def extract_heading_text(line: str) -> str:
-    """Extract text part from numbered heading."""
+    """Strip the leading number from a numbered heading and return the text portion."""
     match = re.match(r'^(\d+(?:\.\d+)*)\s+(.+)$', line)
     if match:
         return match.group(2).strip()
@@ -492,7 +549,11 @@ def extract_heading_text(line: str) -> str:
 
 
 def is_valid_heading(text: str) -> bool:
-    """Check if extracted text is a valid heading."""
+    """Check whether extracted heading text looks like a real section title.
+
+    Rejects text that doesn’t start with a capital letter, is too long,
+    or contains too many non-letter characters.
+    """
     # Must start with capital letter
     if not text or not text[0].isupper():
         return False
@@ -514,21 +575,23 @@ def is_valid_heading(text: str) -> bool:
 
 
 def normalize_category(text: str) -> str:
-    """Normalize heading text to category name."""
-    # Clean and lowercase
+    """Convert heading text to a short, lowercase, punctuation-free category label."""
     category = text.lower().strip()
-    category = re.sub(r'[^\w\s]', '', category)
-    category = ' '.join(category.split())
-    
-    # Truncate if too long
+    category = re.sub(r'[^\w\s]', '', category)   # Remove punctuation
+    category = ' '.join(category.split())          # Normalize whitespace
     if len(category) > 25:
+        # Truncate at a word boundary to keep the label readable
         category = category[:25].rsplit(' ', 1)[0]
-    
     return category
 
 
 def get_section_content(chunks: List[Dict], page_num: int, heading: str) -> str:
-    """Get content preview for a section."""
+    """Return a ~500-char content preview for a section.
+
+    Tries to locate the heading within a chunk on the same page and
+    returns the text immediately after it.  Falls back to the start
+    of the first chunk on that page.
+    """
     for chunk in chunks:
         if chunk.get("page_number") == page_num:
             content = chunk.get("content", "")
@@ -541,7 +604,10 @@ def get_section_content(chunks: List[Dict], page_num: int, heading: str) -> str:
 
 
 def create_page_sections(chunks: List[Dict], doc_id: str) -> Tuple[List[Dict], set]:
-    """Create page-based sections when no headings found."""
+    """Fallback: create one topic per page when no real headings are found.
+
+    The first meaningful sentence on each page is used as the topic title.
+    """
     topics = []
     categories = set()
     
@@ -591,7 +657,7 @@ def create_page_sections(chunks: List[Dict], doc_id: str) -> Tuple[List[Dict], s
 
 
 def sort_categories(categories: List[str]) -> List[str]:
-    """Sort categories with standard academic sections first."""
+    """Sort category labels with standard academic sections first, then alphabetical."""
     standard_order = [
         'abstract', 'introduction', 'related work', 'background',
         'methodology', 'methods', 'model', 'approach',

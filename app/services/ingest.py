@@ -1,11 +1,17 @@
 """
 Document ingestion service.
+
+Orchestrates the entire pipeline for processing an uploaded file:
+  1. Save the raw file to disk.
+  2. Persist document metadata in SQLite.
+  3. Delegate content extraction to the appropriate format-specific extractor.
+  4. Persist extracted chunks, tables, topics, and images.
+  5. Build a FAISS vector index over the text chunks.
 """
 
 import uuid
 from pathlib import Path
 from typing import Dict, Any
-from typing import List
 
 from fastapi import UploadFile
 
@@ -19,6 +25,7 @@ from app.db.sqlite import (
     save_images
 )
 
+# Map of supported file extensions → canonical type labels.
 SUPPORTED_EXTENSIONS = {
     ".pdf": "pdf",
     ".docx": "docx",
@@ -27,10 +34,20 @@ SUPPORTED_EXTENSIONS = {
 }
 
 
-async def ingest_document(file: UploadFile) -> str:
-    """Ingest a document."""
+async def ingest_document(file: UploadFile, user_id: str) -> str:
+    """Ingest a single uploaded document end-to-end.
+
+    Args:
+        file: FastAPI UploadFile from the request.
+        user_id: Authenticated user who owns the document.
+
+    Returns:
+        The newly assigned doc_id (UUID string).
+    """
+    # Generate a unique ID that will be used as the primary key everywhere
     doc_id = str(uuid.uuid4())
     
+    # Determine file type from extension
     filename = file.filename or "unknown"
     ext = Path(filename).suffix.lower()
     filetype = SUPPORTED_EXTENSIONS.get(ext, "unknown")
@@ -38,26 +55,26 @@ async def ingest_document(file: UploadFile) -> str:
     if filetype == "unknown":
         raise ValueError(f"Unsupported file type: {ext}")
     
+    # Construct the on-disk path: uploads/<doc_id>.<ext>
     file_path = settings.upload_dir / f"{doc_id}{ext}"
     
     try:
-        # Read file content
+        # ── Step 1: Read the uploaded bytes and persist to disk ──────
         content = await file.read()
         file_size = len(content)
         
-        # Save to disk
         with open(file_path, "wb") as f:
             f.write(content)
         
         logger.info(f"Saved file: {file_path}")
         
-        # Save metadata
-        save_document_metadata(doc_id, filename, filetype, file_size)
+        # ── Step 2: Record document metadata in the database ────────
+        save_document_metadata(doc_id, filename, filetype, file_size, user_id)
         
-        # Extract content
+        # ── Step 3: Extract structured content (chunks, tables, …) ──
         extracted = await extract_content(file_path, filetype, doc_id)
         
-        # Save extracted data
+        # ── Step 4: Save each category of extracted data ────────────
         if extracted.get("chunks"):
             save_chunks(doc_id, extracted["chunks"])
         
@@ -70,13 +87,14 @@ async def ingest_document(file: UploadFile) -> str:
         if extracted.get("images"):
             save_images(doc_id, extracted["images"])
         
-        # Build index
+        # ── Step 5: Build a FAISS vector index for semantic search ──
         if extracted.get("chunks"):
             try:
                 logger.info(f"Building FAISS index for {len(extracted['chunks'])} chunks...")
                 await build_index(doc_id, extracted["chunks"])
                 logger.info("FAISS index built successfully")
             except Exception as e:
+                # Index failure is non-fatal – the document is still usable
                 logger.warning(f"Index building failed: {e}")
         
         logger.info(f"Ingested document {doc_id}")
@@ -84,13 +102,20 @@ async def ingest_document(file: UploadFile) -> str:
         
     except Exception as e:
         logger.error(f"Ingestion error: {e}")
+        # Clean up the partially-written file to avoid orphans
         if file_path.exists():
             file_path.unlink()
         raise
 
 
 async def extract_content(file_path: Path, filetype: str, doc_id: str) -> Dict[str, Any]:
-    """Extract content from document."""
+    """Dispatch to the correct format-specific extractor.
+
+    Each extractor returns a dict with keys: chunks, tables, topics, keywords, etc.
+    If extraction fails, an empty result dict is returned so that the
+    ingestion pipeline can continue without crashing.
+    """
+    # Initialize with empty lists as the baseline result
     result = {
         "chunks": [],
         "tables": [],
@@ -99,6 +124,7 @@ async def extract_content(file_path: Path, filetype: str, doc_id: str) -> Dict[s
     }
     
     try:
+        # Select the extractor based on the file type
         if filetype == "pdf":
             from app.services.extract.pdf import extract_pdf
             result = await extract_pdf(file_path, doc_id)
@@ -113,18 +139,25 @@ async def extract_content(file_path: Path, filetype: str, doc_id: str) -> Dict[s
             result = await extract_txt(file_path, doc_id)
     except Exception as e:
         logger.error(f"Extraction error: {e}")
-        # Return empty result but don't fail
+        # Gracefully degrade: return whatever was collected so far
         pass
     
     return result
 
 
 async def build_index(doc_id: str, chunks: list) -> bool:
-    """Build FAISS index."""
+    """Build a FAISS vector index from the document's text chunks.
+
+    Converts each chunk dict into the flat format expected by
+    ``faiss_store.create_index`` (keys: item_id, text, category, page).
+
+    Returns:
+        True on success, False on failure.
+    """
     try:
         from app.services.index.faiss_store import create_index
         
-        # Convert chunks to the format expected by create_index
+        # Re-shape chunks into the item schema that create_index expects
         items = []
         for idx, chunk in enumerate(chunks):
             items.append({
@@ -140,80 +173,3 @@ async def build_index(doc_id: str, chunks: list) -> bool:
     except Exception as e:
         logger.error(f"Index error: {e}")
         return False
-
-
-    # --- Backwards-compatible helper wrappers -------------------------------------------------
-    def extract_topics_from_text(pages: List[str], doc_id: str) -> List[Dict[str, Any]]:
-        """Compatibility wrapper: extract topics from a list of page texts."""
-        try:
-            text = "\n\n".join(pages)
-            # Prefer the TXT extractor which implements topic heuristics
-            from app.services.extract.txt import extract_topics as _extract_topics
-            return _extract_topics(text, doc_id)
-        except Exception:
-            return []
-
-
-    def extract_keywords_from_text(text: str, doc_id: str = None, top_n: int = 10) -> List[Dict[str, Any]]:
-        """Compatibility wrapper: extract keywords from a text string.
-
-        The original tests call this synchronously and expect a list of keyword dicts.
-        """
-        try:
-            # Many extractors expose `extract_keywords(text, doc_id)`; call TXT implementation.
-            from app.services.extract.txt import extract_keywords as _extract_keywords
-            # Some implementations expect a doc_id; pass an empty one if not provided
-            doc_id = doc_id or ""
-            kws = _extract_keywords(text, doc_id)
-            # Respect `top_n` if provided
-            return kws[:top_n]
-        except Exception:
-            return []
-
-
-    def detect_tables_in_text(pages: List[str], doc_id: str) -> List[Dict[str, Any]]:
-        """Simple heuristic table detector for plain text.
-
-        Detects contiguous lines that look like columnar data (multiple spaces or pipe separators).
-        """
-        import re
-        tables = []
-        table_index = 0
-
-        for page_num, page in enumerate(pages, start=1):
-            lines = page.splitlines()
-            buffer = []
-
-            for line in lines + [""]:  # sentinel to flush buffer at end
-                # Consider a line as table-like if it contains a pipe or multiple consecutive spaces/tabs
-                if re.search(r"\|", line) or re.search(r"\s{2,}", line):
-                    buffer.append(line.rstrip())
-                    continue
-
-                # Non-table line: if we have accumulated at least two table-like lines, emit a table
-                if len(buffer) >= 2:
-                    table_id = str(uuid.uuid4())
-                    table_text = "\n".join(buffer)
-                    rows_count = len(buffer)
-                    # Estimate columns by splitting the first line
-                    first = buffer[0]
-                    if "|" in first:
-                        cols_count = len([c for c in first.split("|") if c.strip()])
-                    else:
-                        cols_count = len(re.split(r"\s{2,}", first))
-
-                    tables.append({
-                        "table_id": table_id,
-                        "page_number": page_num,
-                        "table_index": table_index,
-                        "table_text": table_text,
-                        "rows_count": rows_count,
-                        "cols_count": cols_count,
-                        "confidence": 0.6
-                    })
-
-                    table_index += 1
-
-                buffer = []
-
-        return tables

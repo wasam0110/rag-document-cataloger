@@ -1,5 +1,9 @@
-"""
-Plain text file extraction with semantic chunking and section detection.
+"""Plain text extraction with semantic chunking and section detection.
+
+Handles .txt files by:
+  1. Reading the raw UTF-8 content.
+  2. Splitting into semantically meaningful chunks (LangChain preferred).
+  3. Detecting standard academic section headings (case-insensitive).
 """
 
 import uuid
@@ -10,7 +14,7 @@ from typing import Dict, Any, List, Tuple
 from app.core.config import settings
 from app.core.logging import logger
 
-# Try to import advanced text splitter
+# LangChain splitter is optional; the fallback uses paragraph-based chunking
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     HAS_LANGCHAIN = True
@@ -19,7 +23,12 @@ except ImportError:
 
 
 async def extract_txt(file_path: Path, doc_id: str) -> Dict[str, Any]:
-    """Extract content from plain text file with intelligent section detection."""
+    """Extract content from a plain-text file.
+
+    Returns a dict with: chunks, tables (always empty for .txt), topics,
+    keywords, images, and categories.
+    """
+    # Initialize empty result; tables/images stay empty for plain text
     result = {
         "chunks": [],
         "tables": [],
@@ -30,14 +39,14 @@ async def extract_txt(file_path: Path, doc_id: str) -> Dict[str, Any]:
     }
     
     try:
-        # Read text file
+        # Read the entire file with a lenient error policy
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
         
-        # Create semantic chunks
+        # Step 1 – split text into overlapping chunks
         result["chunks"] = create_semantic_chunks(text, doc_id)
         
-        # Extract topics with proper section types
+        # Step 2 – detect section headings and categorize them
         result["topics"], result["categories"] = extract_sections(text, doc_id, result["chunks"])
         
         logger.info(f"Extracted TXT: {len(result['chunks'])} chunks, {len(result['topics'])} sections in {len(result['categories'])} categories")
@@ -49,15 +58,21 @@ async def extract_txt(file_path: Path, doc_id: str) -> Dict[str, Any]:
 
 
 def create_semantic_chunks(text: str, doc_id: str) -> List[Dict[str, Any]]:
-    """Create semantic chunks using sentence-aware splitting."""
+    """Split text into overlapping chunks for vector indexing.
+
+    Uses LangChain's RecursiveCharacterTextSplitter when available;
+    falls back to simple paragraph-based splitting otherwise.
+    """
     chunks = []
     chunk_size = settings.chunk_size
     chunk_overlap = settings.chunk_overlap
     
-    # Clean text
+    # Normalize whitespace before splitting
     text = clean_text(text)
     
     if HAS_LANGCHAIN:
+        # Sentence-boundary-aware splitter – tries the coarsest separator
+        # first (double newline) then falls through to finer ones.
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -70,25 +85,28 @@ def create_semantic_chunks(text: str, doc_id: str) -> List[Dict[str, Any]]:
         
         for idx, chunk_text in enumerate(chunk_texts):
             chunk_text = chunk_text.strip()
+            # Discard very short fragments that carry little meaning
             if chunk_text and len(chunk_text) > 20:
                 chunk_id = str(uuid.uuid4())
                 chunks.append({
                     "chunk_id": chunk_id,
                     "content": chunk_text,
                     "chunk_index": idx,
-                    "page_number": 1,
+                    "page_number": 1,           # TXT files are treated as single-page
                     "metadata": {"splitter": "langchain_recursive"}
                 })
     else:
-        # Fallback: paragraph-based chunking
+        # ── Fallback: paragraph-based chunking ──────────────────────
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         current_chunk = ""
         chunk_index = 0
         
         for para in paragraphs:
+            # Accumulate paragraphs until the chunk size limit is reached
             if len(current_chunk) + len(para) < chunk_size:
                 current_chunk += para + "\n\n"
             else:
+                # Flush the current chunk
                 if current_chunk.strip() and len(current_chunk.strip()) > 20:
                     chunk_id = str(uuid.uuid4())
                     chunks.append({
@@ -99,8 +117,10 @@ def create_semantic_chunks(text: str, doc_id: str) -> List[Dict[str, Any]]:
                         "metadata": {}
                     })
                     chunk_index += 1
+                # Start a new chunk with the current paragraph
                 current_chunk = para + "\n\n"
         
+        # Flush the final accumulated chunk
         if current_chunk.strip() and len(current_chunk.strip()) > 20:
             chunk_id = str(uuid.uuid4())
             chunks.append({
@@ -115,19 +135,24 @@ def create_semantic_chunks(text: str, doc_id: str) -> List[Dict[str, Any]]:
 
 
 def clean_text(text: str) -> str:
-    """Clean text by normalizing spacing."""
-    text = re.sub(r' +', ' ', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    """Normalize whitespace: collapse runs of spaces and excessive blank lines."""
+    text = re.sub(r' +', ' ', text)              # Multiple spaces → single space
+    text = re.sub(r'\n{3,}', '\n\n', text)        # 3+ newlines → double newline
     return text.strip()
 
 
 def extract_sections(text: str, doc_id: str, chunks: List[Dict]) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Extract sections with proper section_type categorization."""
+    """Detect section headings in plain text and classify them.
+
+    Scans every line and checks against a map of known academic section
+    keywords.  Numbered headings (e.g. '2.1 Methods') and ALL-CAPS
+    headings are also recognized.  Returns (topics_list, sorted_categories).
+    """
     topics = []
     discovered_categories = set()
-    seen_titles = set()  # Prevent duplicates
+    seen_titles = set()  # Guard against duplicate headings
     
-    # Standard section mappings
+    # Map of canonical section types → keyword variants
     standard_sections = {
         'abstract': ['abstract', 'summary', 'executive summary', 'overview'],
         'introduction': ['introduction', 'intro', 'background and introduction'],
@@ -148,42 +173,40 @@ def extract_sections(text: str, doc_id: str, chunks: List[Dict]) -> Tuple[List[D
     for i, line in enumerate(lines):
         line = line.strip()
         
-        # Skip empty/short lines
+        # Skip empty, too-short, or too-long lines
         if not line or len(line) < 3 or len(line) > 100:
             continue
         
-        # Skip noise
+        # Filter out noise (page numbers, URLs, coordinate-like strings)
         if is_noise_line(line):
             continue
         
-        # Skip list items (starting with -, *, •)
+        # Skip list items – they are content, not headings
         if line.startswith('-') or line.startswith('*') or line.startswith('•'):
             continue
         
-        # Normalize for duplicate check
+        # Normalize for deduplication
         norm_title = line.lower().strip()
         if norm_title in seen_titles:
             continue
         
-        # Check if this is a heading
         section_type = None
         
-        # 1. Check for standard section matches (only)
+        # Strategy 1: direct keyword match against standard sections
         section_type = detect_standard_section(line, standard_sections)
         
-        # 2. Check for numbered section headings like "1. Introduction" or "2.1 Methods"
-        # Only match if the text after the number is a standard section
+        # Strategy 2: numbered headings like '1. Introduction' or '2.1 Methods'
         if not section_type:
             match = re.match(r'^(\d+(?:\.\d+)*\.?\s*)([A-Z][A-Za-z\s]+)$', line)
             if match:
                 heading_text = match.group(2).strip()
                 section_type = detect_standard_section(heading_text, standard_sections)
         
-        # 3. Check for capitalized single-word standard headers only
+        # Strategy 3: title-cased short lines (e.g. 'Introduction')
         if not section_type and line.istitle() and len(line.split()) <= 3 and is_valid_heading(line):
             section_type = detect_standard_section(line, standard_sections)
         
-        # 4. Check for ALL CAPS headers that match standard sections
+        # Strategy 4: ALL-CAPS headers (e.g. 'RESULTS')
         if not section_type and line.isupper() and len(line) < 50 and is_valid_heading(line):
             section_type = detect_standard_section(line, standard_sections)
         
@@ -206,11 +229,11 @@ def extract_sections(text: str, doc_id: str, chunks: List[Dict]) -> Tuple[List[D
                 "content": content
             })
             
-            # Limit sections
+            # Cap the number of detected sections to avoid noise
             if len(topics) >= 25:
                 break
     
-    # If no sections found, create a default "content" section
+    # If nothing was detected, synthesize a single "content" section
     if not topics:
         topic_id = str(uuid.uuid4())
         content = chunks[0]["content"][:500] if chunks else text[:500]
@@ -233,21 +256,21 @@ def extract_sections(text: str, doc_id: str, chunks: List[Dict]) -> Tuple[List[D
 
 
 def is_noise_line(line: str) -> bool:
-    """Check if a line is noise."""
-    # Skip lines that are mostly numbers
+    """Return True if the line is likely noise rather than heading text."""
+    # More than half digits → probably a number string
     digits = sum(c.isdigit() for c in line)
     if len(line) > 0 and digits / len(line) > 0.5:
         return True
     
-    # Skip lines that look like coordinates
+    # All digits / dots / spaces → coordinates or page numbers
     if re.match(r'^[\d\s\.]+$', line):
         return True
     
-    # Skip email/URLs
+    # Email addresses or URLs are not headings
     if '@' in line or 'http' in line.lower() or 'www.' in line.lower():
         return True
     
-    # Must have at least some letters
+    # Require at least 3 alphabetic characters
     letters = sum(c.isalpha() for c in line)
     if letters < 3:
         return True
@@ -256,15 +279,20 @@ def is_noise_line(line: str) -> bool:
 
 
 def detect_standard_section(line: str, standard_sections: Dict) -> str:
-    """Detect if line matches a standard section."""
+    """Match a line against the standard-section keyword map.
+
+    Strips leading numbering and trailing punctuation before comparison.
+    Returns the section type key on match, else None.
+    """
     line_lower = line.lower().strip()
     
-    # Remove leading numbers/punctuation
+    # Strip leading numbering (e.g. '3.1 ') and trailing colons / dots
     clean_line = re.sub(r'^[\d\.\s]+', '', line_lower).strip()
     clean_line = re.sub(r'[:\.]$', '', clean_line).strip()
     
     for section_type, keywords in standard_sections.items():
         for keyword in keywords:
+            # Exact match or keyword prefix followed by a space
             if clean_line == keyword or clean_line.startswith(keyword + " "):
                 return section_type
     
@@ -272,16 +300,19 @@ def detect_standard_section(line: str, standard_sections: Dict) -> str:
 
 
 def is_valid_heading(text: str) -> bool:
-    """Check if text is a valid heading."""
+    """Return True if text is structurally plausible as a heading.
+
+    Headings should be mostly alphabetic and not look like a sentence.
+    """
     if not text:
         return False
     
-    # Should have mostly letters
+    # Require at least 60 % letters
     letters = sum(c.isalpha() for c in text)
     if letters < len(text) * 0.6:
         return False
     
-    # Should not look like a sentence (no period in middle)
+    # Reject sentence-like text (period in the middle)
     if text.count('.') > 1 or (text.count('.') == 1 and not text.endswith('.')):
         return False
     
@@ -289,11 +320,12 @@ def is_valid_heading(text: str) -> bool:
 
 
 def normalize_category(text: str) -> str:
-    """Normalize heading text to category name."""
+    """Convert heading text to a short, lowercase, punctuation-free label."""
     category = text.lower().strip()
-    category = re.sub(r'[^\w\s]', '', category)
-    category = ' '.join(category.split())
+    category = re.sub(r'[^\w\s]', '', category)   # Drop punctuation
+    category = ' '.join(category.split())          # Normalize whitespace
     
+    # Truncate at a word boundary to keep the label readable
     if len(category) > 25:
         category = category[:25].rsplit(' ', 1)[0]
     
@@ -301,13 +333,16 @@ def normalize_category(text: str) -> str:
 
 
 def get_section_content(lines: List[str], heading_index: int, chunks: List[Dict]) -> str:
-    """Get content preview for a section."""
-    # Get next few lines as content preview
+    """Return a ~500-char content preview starting just below the heading.
+
+    Reads up to 5 non-noise lines after the heading, stopping early if
+    another heading is encountered.  Falls back to the first chunk.
+    """
     content_lines = []
     for j in range(heading_index + 1, min(heading_index + 6, len(lines))):
         line = lines[j].strip()
         if line and not is_noise_line(line):
-            # Stop if we hit another heading
+            # Stop if we hit what looks like the next heading
             if line.isupper() and len(line) < 50:
                 break
             if re.match(r'^(\d+\.?\s*)?[A-Z][A-Za-z\s]+$', line) and len(line) < 50:
@@ -316,7 +351,7 @@ def get_section_content(lines: List[str], heading_index: int, chunks: List[Dict]
     
     content = " ".join(content_lines)
     
-    # If no content from lines, get from chunks
+    # Fallback: use the beginning of the first chunk
     if not content and chunks:
         content = chunks[0]["content"][:500]
     
@@ -324,7 +359,7 @@ def get_section_content(lines: List[str], heading_index: int, chunks: List[Dict]
 
 
 def sort_categories(categories: List[str]) -> List[str]:
-    """Sort categories with standard ones first."""
+    """Sort categories with standard academic sections first, then alphabetical."""
     standard_order = [
         'abstract', 'introduction', 'background', 'related work',
         'methodology', 'methods', 'model', 'approach',

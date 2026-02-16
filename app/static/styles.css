@@ -363,6 +363,38 @@ body {
   color: var(--text-muted);
 }
 
+.document-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.document-item:hover .document-actions {
+  opacity: 1;
+}
+
+.document-ask-ai {
+  background: transparent;
+  border: 1px solid var(--green-primary);
+  color: var(--green-light);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: inherit;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.document-ask-ai:hover {
+  background: var(--green-primary);
+  color: white;
+}
+
 .document-delete {
   background: transparent;
   border: none;
@@ -370,12 +402,7 @@ body {
   cursor: pointer;
   padding: 6px;
   border-radius: var(--radius-sm);
-  opacity: 0;
   transition: var(--transition);
-}
-
-.document-item:hover .document-delete {
-  opacity: 1;
 }
 
 .document-delete:hover {
@@ -670,13 +697,16 @@ body {
   padding: 12px;
 }
 
-/* Chat Section */
+/* Chat Section - always pinned to bottom */
 .chat-section {
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
+  min-height: 180px;
   max-height: 300px;
+  flex-shrink: 0;
+  margin-top: auto;
 }
 
 .chat-header {
@@ -741,23 +771,24 @@ body {
 
 .chat-input-area {
   display: flex;
-  gap: 12px;
-  padding: 20px 24px;
+  gap: 10px;
+  padding: 16px 24px;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
+  align-items: center;
 }
 
 .chat-input-area input {
   flex: 1;
-  padding: 16px 20px;
+  padding: 12px 16px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-family: inherit;
   transition: var(--transition);
-  min-height: 52px;
+  min-height: 44px;
 }
 
 .chat-input-area input:focus {
@@ -771,10 +802,37 @@ body {
 }
 
 .chat-input-area .btn {
-  padding: 16px 32px;
-  font-size: 1rem;
+  padding: 10px 20px;
+  font-size: 0.85rem;
   font-weight: 600;
-  min-width: 100px;
+  min-width: auto;
+  flex-shrink: 0;
+  height: 44px;
+  line-height: 1;
+}
+
+#back-to-content-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+#back-to-content-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--green-primary);
+  color: var(--text-primary);
+}
+
+#back-to-content-btn svg {
+  flex-shrink: 0;
 }
 
 /* Modal */

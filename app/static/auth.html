@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - RAG Document Cataloger</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg-primary: #0a0a0a;
+        --bg-secondary: #111111;
+        --bg-card: #141414;
+        --bg-hover: #1f1f1f;
+        --green-primary: #4a7c59;
+        --green-light: #5d9b6e;
+        --green-dark: #3d6b4a;
+        --green-glow: rgba(74, 124, 89, 0.3);
+        --text-primary: #e8e8e8;
+        --text-secondary: #a0a0a0;
+        --text-muted: #666666;
+        --border-color: #2a2a2a;
+        --danger: #c45c5c;
+        --success: #4a7c59;
+      }
+
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        background: var(--bg-primary);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        color: var(--text-primary);
+      }
+
+      .auth-container {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+        width: 100%;
+        max-width: 420px;
+        padding: 40px;
+      }
+
+      .logo {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+
+      .logo-icon {
+        width: 56px;
+        height: 56px;
+        background: linear-gradient(
+          135deg,
+          var(--green-primary),
+          var(--green-dark)
+        );
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 16px;
+        box-shadow: 0 4px 20px var(--green-glow);
+      }
+
+      .logo-icon svg {
+        color: white;
+      }
+
+      .logo h1 {
+        color: var(--text-primary);
+        font-size: 24px;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+
+      .logo p {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .page-title {
+        text-align: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .page-title h2 {
+        color: var(--text-primary);
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .page-title p {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-top: 8px;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--text-secondary);
+        font-weight: 500;
+        font-size: 14px;
+      }
+
+      input {
+        width: 100%;
+        padding: 12px 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 14px;
+        color: var(--text-primary);
+        transition: all 0.2s ease;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: var(--green-primary);
+        background: var(--bg-hover);
+      }
+
+      .btn {
+        width: 100%;
+        padding: 14px;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin-bottom: 12px;
+      }
+
+      .btn-primary {
+        background: linear-gradient(
+          135deg,
+          var(--green-primary),
+          var(--green-dark)
+        );
+        color: white;
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        background: var(--green-light);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px var(--green-glow);
+      }
+
+      .btn-primary:active {
+        transform: translateY(0);
+      }
+
+      .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+      }
+
+      .btn-secondary:hover {
+        background: var(--bg-hover);
+        border-color: var(--green-primary);
+      }
+
+      .error-message {
+        background: rgba(196, 92, 92, 0.1);
+        border: 1px solid var(--danger);
+        color: var(--danger);
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-size: 14px;
+        display: none;
+      }
+
+      .success-message {
+        background: rgba(74, 124, 89, 0.1);
+        border: 1px solid var(--success);
+        color: var(--green-light);
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-size: 14px;
+        display: none;
+      }
+
+      .loading {
+        display: none;
+        text-align: center;
+        color: var(--green-primary);
+        margin-top: 16px;
+      }
+
+      .spinner {
+        border: 3px solid var(--bg-secondary);
+        border-top: 3px solid var(--green-primary);
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 12px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .step {
+        display: none;
+      }
+
+      .step.active {
+        display: block;
+      }
+
+      .back-button {
+        margin-top: 16px;
+        text-align: center;
+      }
+
+      .back-button a {
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      .back-button a:hover {
+        color: var(--green-primary);
+      }
+
+      .code-input {
+        text-align: center;
+        font-size: 24px;
+        letter-spacing: 10px;
+        font-family: "Courier New", monospace;
+        font-weight: bold;
+      }
+
+      .info-box {
+        background: rgba(74, 124, 89, 0.1);
+        border: 1px solid var(--green-primary);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 20px;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .info-box strong {
+        color: var(--green-light);
+      }
+
+      .remember-me {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 20px;
+        cursor: pointer;
+      }
+
+      .remember-me input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--green-primary);
+        cursor: pointer;
+      }
+
+      .remember-me label {
+        margin-bottom: 0;
+        cursor: pointer;
+        user-select: none;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="auth-container">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+            ></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+        </div>
+        <h1>Document Cataloger</h1>
+        <p>AI-Powered Document Analysis</p>
+      </div>
+
+      <div class="page-title">
+        <h2 id="page-title-text">Sign In to Your Account</h2>
+        <p id="page-subtitle">
+          Enter your credentials to receive a verification code
+        </p>
+      </div>
+
+      <div id="error-message" class="error-message"></div>
+      <div id="success-message" class="success-message"></div>
+
+      <!-- Mode Toggle -->
+      <div style="text-align: center; margin-bottom: 20px">
+        <button
+          id="toggle-mode-btn"
+          class="btn btn-secondary"
+          onclick="toggleMode()"
+          style="padding: 8px 20px; font-size: 14px"
+        >
+          Don't have an account? Sign Up
+        </button>
+      </div>
+
+      <!-- Step 1: Enter Email and Password -->
+      <div id="step1" class="step active">
+        <form onsubmit="handleAuth(event)">
+          <div class="form-group">
+            <label for="email">Email Address</label>
+            <input
+              type="email"
+              id="email"
+              required
+              placeholder="your@email.com"
+              autocomplete="email"
+            />
+          </div>
+          <div class="form-group">
+            <label for="password-step1">Password</label>
+            <input
+              type="password"
+              id="password-step1"
+              required
+              placeholder="Enter your password"
+              autocomplete="current-password"
+              minlength="6"
+            />
+            <small style="color: var(--text-secondary); font-size: 12px"
+              >Minimum 6 characters</small
+            >
+          </div>
+          <div class="remember-me">
+            <input type="checkbox" id="remember-me" checked />
+            <label for="remember-me">Remember me — stay signed in</label>
+          </div>
+          <button type="submit" class="btn btn-primary" id="auth-btn">
+            Send Verification Code
+          </button>
+        </form>
+      </div>
+
+      <!-- Step 2: Enter Verification Code and Password -->
+      <div id="step2" class="step">
+        <div class="info-box">
+          <strong>Check your email!</strong><br />
+          We've sent a 6-digit verification code to
+          <span id="user-email"></span>
+        </div>
+
+        <form onsubmit="handleVerifyLogin(event)">
+          <div class="form-group">
+            <label for="code">Verification Code</label>
+            <input
+              type="text"
+              id="code"
+              required
+              placeholder="000000"
+              maxlength="6"
+              pattern="[0-9]{6}"
+              class="code-input"
+              autocomplete="off"
+            />
+          </div>
+          <button type="submit" class="btn btn-primary" id="login-btn">
+            Verify & Sign In
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick="resendCode()"
+          >
+            Resend Code
+          </button>
+        </form>
+
+        <div class="back-button">
+          <a onclick="backToStep1()">← Use different email</a>
+        </div>
+      </div>
+
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p id="loading-text">Processing...</p>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = "/auth";
+      let currentEmail = "";
+      let isSignupMode = false; // Track if we're in signup or login mode
+
+      // Auto-redirect if already authenticated
+      (function checkExistingAuth() {
+        const token = localStorage.getItem("token");
+        const cookie = document.cookie
+          .split("; ")
+          .find((c) => c.startsWith("auth_token="));
+        if (token || cookie) {
+          window.location.href = "/static/index.html";
+        }
+      })();
+
+      function showError(message) {
+        const errorEl = document.getElementById("error-message");
+        errorEl.textContent = message;
+        errorEl.style.display = "block";
+        document.getElementById("success-message").style.display = "none";
+      }
+
+      function showSuccess(message) {
+        const successEl = document.getElementById("success-message");
+        successEl.textContent = message;
+        successEl.style.display = "block";
+        document.getElementById("error-message").style.display = "none";
+      }
+
+      function hideMessages() {
+        document.getElementById("error-message").style.display = "none";
+        document.getElementById("success-message").style.display = "none";
+      }
+
+      function showLoading(show, text = "Processing...") {
+        document.getElementById("loading").style.display = show
+          ? "block"
+          : "none";
+        document.getElementById("loading-text").textContent = text;
+      }
+
+      function toggleMode() {
+        isSignupMode = !isSignupMode;
+        const titleEl = document.getElementById("page-title-text");
+        const subtitleEl = document.getElementById("page-subtitle");
+        const authBtn = document.getElementById("auth-btn");
+        const toggleBtn = document.getElementById("toggle-mode-btn");
+
+        if (isSignupMode) {
+          titleEl.textContent = "Create Your Account";
+          subtitleEl.textContent =
+            "Sign up to get started with Document Cataloger";
+          authBtn.textContent = "Create Account";
+          toggleBtn.textContent = "Already have an account? Sign In";
+        } else {
+          titleEl.textContent = "Sign In to Your Account";
+          subtitleEl.textContent =
+            "Enter your credentials to receive a verification code";
+          authBtn.textContent = "Send Verification Code";
+          toggleBtn.textContent = "Don't have an account? Sign Up";
+        }
+        hideMessages();
+      }
+
+      function showStep(stepNumber) {
+        document.querySelectorAll(".step").forEach((step) => {
+          step.classList.remove("active");
+        });
+        document.getElementById(`step${stepNumber}`).classList.add("active");
+        hideMessages();
+      }
+
+      async function handleAuth(event) {
+        event.preventDefault();
+        hideMessages();
+
+        const email = document.getElementById("email").value;
+        const password = document.getElementById("password-step1").value;
+        currentEmail = email;
+
+        if (isSignupMode) {
+          await handleRegister(email, password);
+        } else {
+          await handleSendCode(email, password);
+        }
+      }
+
+      async function handleRegister(email, password) {
+        const authBtn = document.getElementById("auth-btn");
+        authBtn.disabled = true;
+        authBtn.textContent = "Creating Account...";
+        showLoading(true, "Creating your account...");
+
+        try {
+          const response = await fetch(`${API_BASE}/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            showSuccess("Account created! Now sending verification code...");
+
+            // Automatically switch to login mode and send code
+            setTimeout(async () => {
+              isSignupMode = false;
+              await handleSendCode(email, password);
+            }, 1500);
+          } else {
+            showError(data.detail || "Registration failed. Please try again.");
+            authBtn.disabled = false;
+            authBtn.textContent = "Create Account";
+          }
+        } catch (error) {
+          showError("Network error. Please try again.");
+          authBtn.disabled = false;
+          authBtn.textContent = "Create Account";
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      async function handleSendCode(email, password) {
+        const authBtn = document.getElementById("auth-btn");
+        authBtn.disabled = true;
+        authBtn.textContent = "Sending...";
+        showLoading(true, "Validating credentials and sending code...");
+
+        try {
+          const response = await fetch(`${API_BASE}/send-code`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            showSuccess("Verification code sent! Check your email.");
+            document.getElementById("user-email").textContent = email;
+            setTimeout(() => {
+              showStep(2);
+              document.getElementById("page-title-text").textContent =
+                "Enter Verification Code";
+              document.getElementById("page-subtitle").textContent =
+                "Check your email for the 6-digit code";
+            }, 1500);
+          } else {
+            showError(data.detail || "Failed to send code. Please try again.");
+            authBtn.disabled = false;
+            authBtn.textContent = isSignupMode
+              ? "Create Account"
+              : "Send Verification Code";
+          }
+        } catch (error) {
+          showError("Network error. Please try again.");
+          authBtn.disabled = false;
+          authBtn.textContent = isSignupMode
+            ? "Create Account"
+            : "Send Verification Code";
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      async function handleVerifyLogin(event) {
+        event.preventDefault();
+        hideMessages();
+
+        const code = document.getElementById("code").value;
+
+        const loginBtn = document.getElementById("login-btn");
+        loginBtn.disabled = true;
+        loginBtn.textContent = "Verifying...";
+        showLoading(true, "Verifying code and logging in...");
+
+        try {
+          const response = await fetch(`${API_BASE}/verify-login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: currentEmail,
+              code: code,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            const rememberMe = document.getElementById("remember-me").checked;
+            const token = data.access_token;
+
+            // Always store in localStorage for JS access
+            localStorage.setItem("token", token);
+
+            // Cookie is set by server, but also set on client for reliability
+            if (rememberMe) {
+              // 30 days for Remember Me
+              document.cookie = `auth_token=${token}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
+            } else {
+              // Session cookie (expires when browser closes)
+              document.cookie = `auth_token=${token}; path=/; SameSite=Lax`;
+            }
+
+            showSuccess("Login successful! Redirecting...");
+            setTimeout(() => {
+              window.location.href = "/static/index.html";
+            }, 1000);
+          } else {
+            showError(
+              data.detail || "Invalid verification code. Please try again.",
+            );
+            loginBtn.disabled = false;
+            loginBtn.textContent = "Verify & Sign In";
+          }
+        } catch (error) {
+          showError("Network error. Please try again.");
+          loginBtn.disabled = false;
+          loginBtn.textContent = "Verify & Sign In";
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      async function resendCode() {
+        hideMessages();
+
+        // Get the password from step 1 (need to store it)
+        const password = document.getElementById("password-step1").value;
+        if (!password) {
+          showError("Please go back and re-enter your credentials.");
+          return;
+        }
+
+        showLoading(true, "Resending code...");
+
+        try {
+          const response = await fetch(`${API_BASE}/send-code`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: currentEmail, password: password }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            showSuccess("New verification code sent! Check your email.");
+          } else {
+            showError(data.detail || "Failed to resend code.");
+          }
+        } catch (error) {
+          showError("Network error. Please try again.");
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      function backToStep1() {
+        showStep(1);
+        document.getElementById("page-title-text").textContent =
+          "Sign In to Your Account";
+        document.getElementById("page-subtitle").textContent =
+          "Enter your credentials to receive a verification code";
+        document.getElementById("email").value = currentEmail;
+        document.getElementById("code").value = "";
+        document.getElementById("auth-btn").disabled = false;
+        document.getElementById("auth-btn").textContent =
+          "Send Verification Code";
+        isSignupMode = false;
+      }
+
+      // Auto-format code input (optional)
+      document.getElementById("code")?.addEventListener("input", function (e) {
+        this.value = this.value.replace(/[^0-9]/g, "");
+      });
+    </script>
+  </body>
+</html>
